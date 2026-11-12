@@ -1,0 +1,35 @@
+{
+  "schema": "ubuntuguard.usb_control.v1",
+  "mode": "allowlist_enforce",
+  "protected_classes": [
+    "mass_storage"
+  ],
+  "always_allow_classes": [
+    "hid",
+    "hub",
+    "audio",
+    "video",
+    "billboard",
+    "network"
+  ],
+  "allowlist": [
+    {
+      "entry_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "match": {
+        "vendor_id": "0781",
+        "product_id": "5583",
+        "serial": "4C530001120523117082",
+        "serial_match": "exact"
+      },
+      "label": "Finance team SanDisk Ultra Fit",
+      "added_by": "it-admin",
+      "added_at": "2026-10-20T09:15:00Z"
+    }
+  ],
+  "exceptions": [],
+  "reporting": {
+    "report_allowed": true,
+    "report_blocked": true,
+    "report_present_at_start": true
+  }
+}

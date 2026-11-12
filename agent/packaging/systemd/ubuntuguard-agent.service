@@ -1,0 +1,109 @@
+[Unit]
+Description=UbuntuGuard endpoint agent
+Documentation=https://ubuntuguard.invalid/docs/agent
+# The agent is useful before the network is up - it has local state to read and
+# a certificate to check - so the network is Wanted, not Required. Requiring it
+# would leave the agent dead on a laptop that boots without a connection, which
+# is the normal case for a laptop.
+After=network-online.target
+Wants=network-online.target
+
+# Five failures inside a minute stops the restart loop. A crash loop that
+# restarts forever hides the problem in the journal and keeps the CPU warm.
+#
+# These two belong in [Unit], not [Service]. Put in [Service] they are parsed
+# as unknown keys and silently ignored, which `systemd-analyze verify` reports
+# and nothing else does - the service starts, restarts work, and the rate limit
+# simply is not there.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# --- least privilege ------------------------------------------------------- #
+# An unprivileged account with no login shell and no home directory. The agent
+# needs to read /proc and /etc/os-release, write its own state directory, and
+# make outbound HTTPS connections. None of that needs root.
+#
+# USB enforcement does need root, and it is deliberately NOT in this unit. It
+# arrives in Phase 7 as a separate root service with a fixed, typed operation
+# set over a Unix socket, so the component that parses untrusted responses from
+# the server is never the component holding privilege.
+User=ubuntuguard
+Group=ubuntuguard
+
+ExecStart=/opt/ubuntuguard/venv/bin/python -m ubuntuguard_agent run
+
+# Logs go to the journal as single-line JSON. Unbuffered so a line arrives when
+# it is written rather than when a 4 KiB buffer fills - the difference matters
+# when the thing you are debugging is why the agent stopped.
+#
+# PYTHONDONTWRITEBYTECODE: site-packages is read-only under
+# ProtectSystem=strict, so bytecode writing would fail on every import.
+#
+# Both on one line deliberately. systemd merges repeated Environment=
+# directives, but most INI parsers - including the one the packaging test uses
+# to read this file - keep only the last occurrence, so a second line would
+# make the first invisible to anything checking this unit.
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+# --- restart and shutdown -------------------------------------------------- #
+Restart=on-failure
+RestartSec=5s
+
+# SIGTERM is what the agent's handler expects; it sets a flag and the service
+# loop unwinds. TimeoutStopSec is the hard ceiling and must stay at or above
+# SHUTDOWN_GRACE_SECONDS in constants.py.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=30s
+
+# --- state ----------------------------------------------------------------- #
+# systemd creates and owns these, so the install script does not have to get
+# the ownership right and cannot get it wrong on an upgrade.
+#   /var/lib/ubuntuguard  0750  state, SQLite queue, pki/
+#   /run/ubuntuguard      0750  the Phase 7 enforcer socket
+StateDirectory=ubuntuguard
+StateDirectoryMode=0750
+RuntimeDirectory=ubuntuguard
+RuntimeDirectoryMode=0750
+
+# --- hardening ------------------------------------------------------------- #
+# UNVALIDATED on Ubuntu 22.04 and 24.04: this unit has been checked with
+# `systemd-analyze verify` and run on the development machine only. If the
+# service fails to start on a target release, MemoryDenyWriteExecute and
+# SystemCallFilter are the two directives to suspect first - some Python
+# extension modules allocate executable memory for callbacks. Removing either
+# is a supported local change; removing both should not be necessary.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# The agent needs no capabilities at all. Stated explicitly rather than left to
+# the default, so an edit that adds one is visible in a diff.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+# This is what makes the agent come back after a reboot, once the unit is
+# enabled. `systemctl enable` creates the symlink; `install.sh` does that and
+# says so.
+WantedBy=multi-user.target

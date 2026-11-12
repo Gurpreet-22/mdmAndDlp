@@ -1,0 +1,17 @@
+{
+  "schema": "ubuntuguard.inventory.v1",
+  "collected_at": "2026-10-29T10:05:12Z",
+  "agent": {
+    "version": "0.1.0",
+    "started_at": "2026-10-29T07:58:03Z"
+  },
+  "host": {
+    "hostname": "fin-laptop-014",
+    "arch": "x86_64",
+    "os": {
+      "id": "ubuntu",
+      "version_id": "24.04",
+      "kernel": "6.8.0-45-generic"
+    }
+  }
+}

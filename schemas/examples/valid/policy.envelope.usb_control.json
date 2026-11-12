@@ -1,0 +1,19 @@
+{
+  "envelope_version": 1,
+  "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  "policy_version": 7,
+  "policy_type": "usb_control",
+  "scope": {
+    "kind": "device",
+    "id": "9a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d"
+  },
+  "issued_at": "2026-10-29T10:00:00Z",
+  "expires_at": null,
+  "payload_b64": "eyJhbGxvd2xpc3QiOlt7ImFkZGVkX2F0IjoiMjAyNi0xMC0yMFQwOToxNTowMFoiLCJhZGRlZF9ieSI6Iml0LWFkbWluIiwiZW50cnlfaWQiOiI3YzllNjY3OS03NDI1LTQwZGUtOTQ0Yi1lMDdmYzFmOTBhZTciLCJsYWJlbCI6IkZpbmFuY2UgdGVhbSBTYW5EaXNrIFVsdHJhIEZpdCIsIm1hdGNoIjp7InByb2R1Y3RfaWQiOiI1NTgzIiwic2VyaWFsIjoiNEM1MzAwMDExMjA1MjMxMTcwODIiLCJzZXJpYWxfbWF0Y2giOiJleGFjdCIsInZlbmRvcl9pZCI6IjA3ODEifX1dLCJhbHdheXNfYWxsb3dfY2xhc3NlcyI6WyJoaWQiLCJodWIiLCJhdWRpbyIsInZpZGVvIiwiYmlsbGJvYXJkIiwibmV0d29yayJdLCJleGNlcHRpb25zIjpbXSwibW9kZSI6ImFsbG93bGlzdF9lbmZvcmNlIiwicHJvdGVjdGVkX2NsYXNzZXMiOlsibWFzc19zdG9yYWdlIl0sInJlcG9ydGluZyI6eyJyZXBvcnRfYWxsb3dlZCI6dHJ1ZSwicmVwb3J0X2Jsb2NrZWQiOnRydWUsInJlcG9ydF9wcmVzZW50X2F0X3N0YXJ0Ijp0cnVlfSwic2NoZW1hIjoidWJ1bnR1Z3VhcmQudXNiX2NvbnRyb2wudjEifQ==",
+  "payload_sha256": "431a018a2fe92bb5b134852f8bcc53e7bccd4ae1ef345d7ae0875a4f90d8e4ce",
+  "signature": {
+    "alg": "ed25519",
+    "key_id": "ed25519:591a43e375a40af2",
+    "value_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg=="
+  }
+}

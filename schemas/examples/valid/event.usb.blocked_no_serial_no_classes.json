@@ -1,0 +1,26 @@
+{
+  "schema": "ubuntuguard.event.usb.v1",
+  "event_id": "01934f2b-8d22-7b4f-9c3e-7a2d0f1b5c68",
+  "event_type": "usb_inserted",
+  "occurred_at": "2026-10-29T11:45:03Z",
+  "monotonic_ms": 13551890,
+  "device": {
+    "vendor_id": "1f75",
+    "product_id": "0917",
+    "product_name": null,
+    "vendor_name": null,
+    "serial": null,
+    "interface_classes": [],
+    "via_port": "1-4",
+    "connect_type": "hotplug",
+    "parent_hash": null
+  },
+  "decision": "blocked",
+  "decision_source": "implicit_default",
+  "policy": {
+    "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "policy_version": 7,
+    "matched_entry_id": null,
+    "exception_id": null
+  }
+}

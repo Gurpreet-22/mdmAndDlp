@@ -1,0 +1,5 @@
+{
+  "schema": "ubuntuguard.agent_settings.v1",
+  "heartbeat_seconds": 5,
+  "log_level": "info"
+}

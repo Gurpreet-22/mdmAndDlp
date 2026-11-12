@@ -1,0 +1,42 @@
+# UbuntuGuard agent configuration.
+#
+# Copy to /etc/ubuntuguard/agent.yaml and set both values.
+#
+# This file carries exactly two things, and the shortness is the point. Every
+# tunable - heartbeat interval, backoff, log level, queue sizes - comes from the
+# agent's compiled defaults and may only be changed by a signed agent_settings
+# policy, which is auditable. An operator editing a file on a laptop cannot
+# widen a heartbeat interval or turn the log level down.
+#
+# What is left here is what the agent needs in order to fetch a policy at all:
+# where the server is, and what to trust when validating it.
+#
+# Any key other than the two below is an error that names the key, rather than
+# being silently ignored. A typo that is ignored sends you hunting in the wrong
+# place, because the agent reports "no server configured" while this file
+# plainly contains a server.
+
+# Base URL of the UbuntuGuard API. Must be https.
+#
+# There is no plaintext fallback. A release build refuses http outright; a
+# development build will accept it only for a loopback address and only with
+# both UG_AGENT_DEV=1 and UG_AGENT_ALLOW_PLAINTEXT_HTTP=1,
+# and it logs a warning on every start when it does.
+#
+# Do not include the /api/v1 prefix; the agent adds it.
+server_url: https://ubuntuguard.example.internal
+
+# PEM bundle of the CA that issued the SERVER's TLS certificate. Absolute path.
+#
+# Read this twice, because it is the easiest thing to get wrong here: this
+# validates the server. It is NOT the device CA chain that the enrollment
+# response returns in `ca_chain_pem` - that one is the issuer of this laptop's
+# own client certificate, it is written to /var/lib/ubuntuguard/pki/ca-chain.pem
+# by enrollment, and it is presented during the TLS handshake rather than used
+# to check the other side. Two separate trust stores with two separate jobs.
+#
+# Pinned to a bundle rather than using the system trust store on purpose: the
+# server certificate is issued by an internal CA, and trusting every public CA
+# in order to reach it would widen the set of issuers that could impersonate the
+# control plane to roughly all of them.
+server_ca_bundle: /etc/ubuntuguard/server-ca.pem

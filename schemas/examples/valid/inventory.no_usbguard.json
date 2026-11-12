@@ -1,0 +1,46 @@
+{
+  "schema": "ubuntuguard.inventory.v1",
+  "collected_at": "2026-10-29T10:06:00Z",
+  "agent": {
+    "version": "0.1.0",
+    "release_build": true,
+    "started_at": "2026-10-29T10:00:00Z",
+    "enforcer_running": true
+  },
+  "host": {
+    "hostname": "eng-laptop-manual-build",
+    "arch": "x86_64",
+    "os": {
+      "id": "ubuntu",
+      "version_id": "22.04",
+      "pretty_name": "Ubuntu 22.04.5 LTS",
+      "kernel": "5.15.0-119-generic"
+    }
+  },
+  "capabilities": [
+    { "name": "inventory", "supported": true },
+    { "name": "policy_apply", "supported": true },
+    { "name": "policy_rollback", "supported": true },
+    { "name": "usb_control", "supported": false, "detail": "usbguard not installed" },
+    { "name": "usb_event_stream", "supported": false, "detail": "usbguard D-Bus service not available" },
+    { "name": "usb_present_enumeration", "supported": false, "detail": "usbguard not installed" }
+  ],
+  "adapter": {
+    "name": "ubuntu",
+    "details": {
+      "usbguard_present": false,
+      "usbguard_version": null,
+      "usbguard_daemon_active": false,
+      "usbguard_dbus_available": false
+    }
+  },
+  "applied_policies": [
+    {
+      "policy_type": "usb_control",
+      "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "policy_version": 7,
+      "status": "unsupported",
+      "verified_at": "2026-10-29T10:00:30Z"
+    }
+  ]
+}

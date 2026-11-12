@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/event.agent.v1.schema.json",
+  "title": "UbuntuGuard agent operational event, version 1",
+  "description": "Agent self-reporting: things that affect whether enforcement can be trusted. These exist so that a degraded agent is visible in the dashboard instead of quietly looking healthy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "event_id", "event_type", "occurred_at", "severity"],
+  "properties": {
+    "schema": { "const": "ubuntuguard.event.agent.v1" },
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "agent_started",
+        "agent_stopped",
+        "resumed_from_sleep",
+        "network_restored",
+        "policy_applied",
+        "policy_failed",
+        "policy_rolled_back",
+        "policy_unsupported",
+        "settings_clamped",
+        "queue_overflow",
+        "enforcer_unavailable",
+        "enforcer_rejected_request",
+        "capability_lost",
+        "clock_jump_detected",
+        "certificate_renewed"
+      ]
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "monotonic_ms": { "type": "integer", "minimum": 0 },
+    "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+    "reason_code": {
+      "type": ["string", "null"],
+      "enum": [
+        "signature_invalid", "unknown_key_id", "payload_too_large", "hash_mismatch",
+        "scope_mismatch", "version_not_newer", "envelope_expired", "clock_skew_exceeded",
+        "schema_invalid", "unknown_field", "invariant_violation", "capability_missing",
+        "snapshot_failed", "enforce_failed", "enforcer_unavailable", "enforcer_rejected",
+        "verify_failed", "verify_drift", "rollback_failed", "value_clamped",
+        "queue_full", "unknown", null
+      ],
+      "description": "Closed vocabulary shared with the policy-status API, so the dashboard can group failures without parsing free text."
+    },
+    "detail": {
+      "type": ["string", "null"],
+      "maxLength": 512,
+      "description": "Short operator-facing explanation. MUST NOT contain tokens, keys, certificates, signature values or file contents; test_no_secrets_in_event_detail asserts this for the known-secret fixtures."
+    },
+    "fields": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
+      "description": "Flat scalar context, e.g. {\"setting\":\"heartbeat_seconds\",\"requested\":5,\"applied\":30} for settings_clamped, or {\"dropped\":412} for queue_overflow."
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy_id": { "type": ["string", "null"], "format": "uuid" },
+        "policy_type": { "type": ["string", "null"], "enum": ["usb_control", "agent_settings", null] },
+        "policy_version": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  }
+}

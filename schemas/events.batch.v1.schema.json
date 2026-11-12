@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/events.batch.v1.schema.json",
+  "title": "UbuntuGuard event batch upload, version 1",
+  "description": "Body of POST /api/v1/devices/me/events:batch. Delivery is at-least-once: the agent keeps each event in its durable SQLite queue until the server acknowledges that event_id as accepted or duplicate. The batch is rejected as a whole only on schema failure; otherwise the response reports per-event outcomes so one bad event cannot block a queue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "sent_at", "events"],
+  "properties": {
+    "schema": { "const": "ubuntuguard.events.batch.v1" },
+    "sent_at": { "type": "string", "format": "date-time" },
+    "queue_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Events still queued after this batch. Lets the dashboard show a backlog instead of inferring health from silence."
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "oneOf": [
+          { "$ref": "https://ubuntuguard.invalid/schemas/event.usb.v1.schema.json" },
+          { "$ref": "https://ubuntuguard.invalid/schemas/event.agent.v1.schema.json" }
+        ],
+        "description": "Discriminated by the 'schema' const in each event, so oneOf can never be ambiguous."
+      }
+    }
+  }
+}

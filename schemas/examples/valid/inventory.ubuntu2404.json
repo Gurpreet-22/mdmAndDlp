@@ -1,0 +1,73 @@
+{
+  "schema": "ubuntuguard.inventory.v1",
+  "collected_at": "2026-10-29T10:05:12Z",
+  "agent": {
+    "version": "0.1.0",
+    "build_commit": "a3f91c7d",
+    "release_build": true,
+    "started_at": "2026-10-29T07:58:03Z",
+    "enforcer_running": true
+  },
+  "host": {
+    "hostname": "fin-laptop-014",
+    "arch": "x86_64",
+    "uptime_seconds": 7629,
+    "boot_id": "4f1c2a6b8e9d4a1b9c3d5e7f0a2b4c6d",
+    "machine_id_hash": "8c7d2f1a9b4e6c3d5f7a90b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f2a4b6c8d0",
+    "os": {
+      "id": "ubuntu",
+      "version_id": "24.04",
+      "pretty_name": "Ubuntu 24.04.3 LTS",
+      "kernel": "6.8.0-45-generic"
+    },
+    "hardware": {
+      "vendor": "LENOVO",
+      "product_name": "ThinkPad T14 Gen 4",
+      "product_uuid_hash": "1f2e3d4c5b6a79880f1e2d3c4b5a69788f0e1d2c3b4a59687e0d1c2b3a495867",
+      "virtualization": "none",
+      "chassis": "laptop"
+    },
+    "network_interfaces": [
+      { "name": "wlp3s0", "mac": "a4:c3:f0:1b:2c:3d", "type": "wifi" },
+      { "name": "enp0s31f6", "mac": "f8:75:a4:9b:01:22", "type": "ethernet" }
+    ]
+  },
+  "capabilities": [
+    { "name": "inventory", "supported": true },
+    { "name": "policy_apply", "supported": true },
+    { "name": "policy_rollback", "supported": true },
+    { "name": "usb_control", "supported": true },
+    { "name": "usb_event_stream", "supported": true },
+    { "name": "usb_present_enumeration", "supported": true }
+  ],
+  "adapter": {
+    "name": "ubuntu",
+    "details": {
+      "usbguard_present": true,
+      "usbguard_version": "1.1.2",
+      "usbguard_daemon_active": true,
+      "usbguard_dbus_available": true,
+      "usbguard_rules_path": "/etc/usbguard/rules.conf",
+      "usbguard_config_path": "/etc/usbguard/usbguard-daemon.conf",
+      "usbguard_implicit_policy_target": "block",
+      "usbguard_present_device_policy": "apply-policy",
+      "systemd_version": "255"
+    }
+  },
+  "applied_policies": [
+    {
+      "policy_type": "usb_control",
+      "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "policy_version": 7,
+      "status": "applied",
+      "verified_at": "2026-10-29T08:00:41Z"
+    },
+    {
+      "policy_type": "agent_settings",
+      "policy_id": "5d1a9c3e-2b74-4f80-8e16-7c9d0a1b2e34",
+      "policy_version": 3,
+      "status": "applied",
+      "verified_at": "2026-10-29T08:00:12Z"
+    }
+  ]
+}

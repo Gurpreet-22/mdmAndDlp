@@ -1,0 +1,130 @@
+{
+  "_comment": "Cross-language policy signing vector. Both the Python server tests and the Go agent tests must reproduce signature_b64 from the derivation string and the envelope fields. Regenerate with tools/make_policy_vectors.py.",
+  "key_derivation": {
+    "note": "No key bytes are committed. Recompute in any language.",
+    "algorithm": "ed25519",
+    "seed": "SHA-256(ascii(derivation_string))",
+    "derivation_string": "ubuntuguard/test-vector/policy-signing/v1",
+    "expected_public_key_b64": "NxAPKz1vCZae/EkoZjQFbaSizXoWew47t/9jawUgteg=",
+    "expected_key_id": "ed25519:591a43e375a40af2"
+  },
+  "sig_input_spec": {
+    "domain_separator": "ubuntuguard/policy-envelope/v1",
+    "length_prefix": "uint64 big-endian length || bytes",
+    "field_order": [
+      "policy_id",
+      "policy_version (uint64 big-endian)",
+      "policy_type",
+      "scope.kind",
+      "scope.id",
+      "issued_at",
+      "expires_at (empty string when null)",
+      "key_id",
+      "payload_bytes"
+    ],
+    "signature_algorithm": "pure Ed25519 (RFC 8032), not Ed25519ph"
+  },
+  "positive": {
+    "envelope": {
+      "envelope_version": 1,
+      "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "policy_version": 7,
+      "policy_type": "usb_control",
+      "scope": {
+        "kind": "device",
+        "id": "9a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d"
+      },
+      "issued_at": "2026-10-29T10:00:00Z",
+      "expires_at": null,
+      "payload_b64": "eyJhbGxvd2xpc3QiOlt7ImFkZGVkX2F0IjoiMjAyNi0xMC0yMFQwOToxNTowMFoiLCJhZGRlZF9ieSI6Iml0LWFkbWluIiwiZW50cnlfaWQiOiI3YzllNjY3OS03NDI1LTQwZGUtOTQ0Yi1lMDdmYzFmOTBhZTciLCJsYWJlbCI6IkZpbmFuY2UgdGVhbSBTYW5EaXNrIFVsdHJhIEZpdCIsIm1hdGNoIjp7InByb2R1Y3RfaWQiOiI1NTgzIiwic2VyaWFsIjoiNEM1MzAwMDExMjA1MjMxMTcwODIiLCJzZXJpYWxfbWF0Y2giOiJleGFjdCIsInZlbmRvcl9pZCI6IjA3ODEifX1dLCJhbHdheXNfYWxsb3dfY2xhc3NlcyI6WyJoaWQiLCJodWIiLCJhdWRpbyIsInZpZGVvIiwiYmlsbGJvYXJkIiwibmV0d29yayJdLCJleGNlcHRpb25zIjpbXSwibW9kZSI6ImFsbG93bGlzdF9lbmZvcmNlIiwicHJvdGVjdGVkX2NsYXNzZXMiOlsibWFzc19zdG9yYWdlIl0sInJlcG9ydGluZyI6eyJyZXBvcnRfYWxsb3dlZCI6dHJ1ZSwicmVwb3J0X2Jsb2NrZWQiOnRydWUsInJlcG9ydF9wcmVzZW50X2F0X3N0YXJ0Ijp0cnVlfSwic2NoZW1hIjoidWJ1bnR1Z3VhcmQudXNiX2NvbnRyb2wudjEifQ==",
+      "payload_sha256": "431a018a2fe92bb5b134852f8bcc53e7bccd4ae1ef345d7ae0875a4f90d8e4ce",
+      "signature": {
+        "alg": "ed25519",
+        "key_id": "ed25519:591a43e375a40af2",
+        "value_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg=="
+      }
+    },
+    "expected_payload_len": 550,
+    "expected_sig_input_len": 793,
+    "expected_sig_input_sha256": "f76a8a88bc90665d09625e1e0bb24e1c4782a289e068b475fbfc6e0efa02add7",
+    "expected_signature_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg==",
+    "must_verify": true
+  },
+  "negative": [
+    {
+      "name": "payload_bit_flipped",
+      "why": "one bit of the payload changed; signature must not verify",
+      "expected_reason_code": "signature_invalid",
+      "envelope": {
+        "envelope_version": 1,
+        "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "policy_version": 7,
+        "policy_type": "usb_control",
+        "scope": {
+          "kind": "device",
+          "id": "9a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d"
+        },
+        "issued_at": "2026-10-29T10:00:00Z",
+        "expires_at": null,
+        "payload_b64": "eiJhbGxvd2xpc3QiOlt7ImFkZGVkX2F0IjoiMjAyNi0xMC0yMFQwOToxNTowMFoiLCJhZGRlZF9ieSI6Iml0LWFkbWluIiwiZW50cnlfaWQiOiI3YzllNjY3OS03NDI1LTQwZGUtOTQ0Yi1lMDdmYzFmOTBhZTciLCJsYWJlbCI6IkZpbmFuY2UgdGVhbSBTYW5EaXNrIFVsdHJhIEZpdCIsIm1hdGNoIjp7InByb2R1Y3RfaWQiOiI1NTgzIiwic2VyaWFsIjoiNEM1MzAwMDExMjA1MjMxMTcwODIiLCJzZXJpYWxfbWF0Y2giOiJleGFjdCIsInZlbmRvcl9pZCI6IjA3ODEifX1dLCJhbHdheXNfYWxsb3dfY2xhc3NlcyI6WyJoaWQiLCJodWIiLCJhdWRpbyIsInZpZGVvIiwiYmlsbGJvYXJkIiwibmV0d29yayJdLCJleGNlcHRpb25zIjpbXSwibW9kZSI6ImFsbG93bGlzdF9lbmZvcmNlIiwicHJvdGVjdGVkX2NsYXNzZXMiOlsibWFzc19zdG9yYWdlIl0sInJlcG9ydGluZyI6eyJyZXBvcnRfYWxsb3dlZCI6dHJ1ZSwicmVwb3J0X2Jsb2NrZWQiOnRydWUsInJlcG9ydF9wcmVzZW50X2F0X3N0YXJ0Ijp0cnVlfSwic2NoZW1hIjoidWJ1bnR1Z3VhcmQudXNiX2NvbnRyb2wudjEifQ==",
+        "payload_sha256": "3aea941cdfec31eebd9146c785bb48064576189ed8527dafcd032de3b9c3fc7a",
+        "signature": {
+          "alg": "ed25519",
+          "key_id": "ed25519:591a43e375a40af2",
+          "value_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg=="
+        }
+      },
+      "must_verify": false
+    },
+    {
+      "name": "version_bumped_without_resigning",
+      "why": "policy_version is inside SIG_INPUT, so replaying a payload under a higher version must fail",
+      "expected_reason_code": "signature_invalid",
+      "envelope": {
+        "envelope_version": 1,
+        "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "policy_version": 8,
+        "policy_type": "usb_control",
+        "scope": {
+          "kind": "device",
+          "id": "9a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d"
+        },
+        "issued_at": "2026-10-29T10:00:00Z",
+        "expires_at": null,
+        "payload_b64": "eyJhbGxvd2xpc3QiOlt7ImFkZGVkX2F0IjoiMjAyNi0xMC0yMFQwOToxNTowMFoiLCJhZGRlZF9ieSI6Iml0LWFkbWluIiwiZW50cnlfaWQiOiI3YzllNjY3OS03NDI1LTQwZGUtOTQ0Yi1lMDdmYzFmOTBhZTciLCJsYWJlbCI6IkZpbmFuY2UgdGVhbSBTYW5EaXNrIFVsdHJhIEZpdCIsIm1hdGNoIjp7InByb2R1Y3RfaWQiOiI1NTgzIiwic2VyaWFsIjoiNEM1MzAwMDExMjA1MjMxMTcwODIiLCJzZXJpYWxfbWF0Y2giOiJleGFjdCIsInZlbmRvcl9pZCI6IjA3ODEifX1dLCJhbHdheXNfYWxsb3dfY2xhc3NlcyI6WyJoaWQiLCJodWIiLCJhdWRpbyIsInZpZGVvIiwiYmlsbGJvYXJkIiwibmV0d29yayJdLCJleGNlcHRpb25zIjpbXSwibW9kZSI6ImFsbG93bGlzdF9lbmZvcmNlIiwicHJvdGVjdGVkX2NsYXNzZXMiOlsibWFzc19zdG9yYWdlIl0sInJlcG9ydGluZyI6eyJyZXBvcnRfYWxsb3dlZCI6dHJ1ZSwicmVwb3J0X2Jsb2NrZWQiOnRydWUsInJlcG9ydF9wcmVzZW50X2F0X3N0YXJ0Ijp0cnVlfSwic2NoZW1hIjoidWJ1bnR1Z3VhcmQudXNiX2NvbnRyb2wudjEifQ==",
+        "payload_sha256": "431a018a2fe92bb5b134852f8bcc53e7bccd4ae1ef345d7ae0875a4f90d8e4ce",
+        "signature": {
+          "alg": "ed25519",
+          "key_id": "ed25519:591a43e375a40af2",
+          "value_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg=="
+        }
+      },
+      "must_verify": false
+    },
+    {
+      "name": "scope_swapped_to_another_device",
+      "why": "scope is inside SIG_INPUT, so a policy signed for device A must not verify for device B",
+      "expected_reason_code": "signature_invalid",
+      "envelope": {
+        "envelope_version": 1,
+        "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "policy_version": 7,
+        "policy_type": "usb_control",
+        "scope": {
+          "kind": "device",
+          "id": "00000000-0000-4000-8000-000000000000"
+        },
+        "issued_at": "2026-10-29T10:00:00Z",
+        "expires_at": null,
+        "payload_b64": "eyJhbGxvd2xpc3QiOlt7ImFkZGVkX2F0IjoiMjAyNi0xMC0yMFQwOToxNTowMFoiLCJhZGRlZF9ieSI6Iml0LWFkbWluIiwiZW50cnlfaWQiOiI3YzllNjY3OS03NDI1LTQwZGUtOTQ0Yi1lMDdmYzFmOTBhZTciLCJsYWJlbCI6IkZpbmFuY2UgdGVhbSBTYW5EaXNrIFVsdHJhIEZpdCIsIm1hdGNoIjp7InByb2R1Y3RfaWQiOiI1NTgzIiwic2VyaWFsIjoiNEM1MzAwMDExMjA1MjMxMTcwODIiLCJzZXJpYWxfbWF0Y2giOiJleGFjdCIsInZlbmRvcl9pZCI6IjA3ODEifX1dLCJhbHdheXNfYWxsb3dfY2xhc3NlcyI6WyJoaWQiLCJodWIiLCJhdWRpbyIsInZpZGVvIiwiYmlsbGJvYXJkIiwibmV0d29yayJdLCJleGNlcHRpb25zIjpbXSwibW9kZSI6ImFsbG93bGlzdF9lbmZvcmNlIiwicHJvdGVjdGVkX2NsYXNzZXMiOlsibWFzc19zdG9yYWdlIl0sInJlcG9ydGluZyI6eyJyZXBvcnRfYWxsb3dlZCI6dHJ1ZSwicmVwb3J0X2Jsb2NrZWQiOnRydWUsInJlcG9ydF9wcmVzZW50X2F0X3N0YXJ0Ijp0cnVlfSwic2NoZW1hIjoidWJ1bnR1Z3VhcmQudXNiX2NvbnRyb2wudjEifQ==",
+        "payload_sha256": "431a018a2fe92bb5b134852f8bcc53e7bccd4ae1ef345d7ae0875a4f90d8e4ce",
+        "signature": {
+          "alg": "ed25519",
+          "key_id": "ed25519:591a43e375a40af2",
+          "value_b64": "jjG2Ywuf9rsH5NEhYedPsBSSYUCPxa2HVlFi19s3dMYGwo5q41xCRYBJLZJlm4E4wWPhOI6qdwK6zJ6eo9j5Bg=="
+        }
+      },
+      "must_verify": false
+    }
+  ]
+}

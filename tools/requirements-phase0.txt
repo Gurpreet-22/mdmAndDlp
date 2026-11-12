@@ -1,0 +1,15 @@
+# Phase 0 tooling only. The server's real dependency set arrives in Phase 1.
+#
+# jsonschema  - validates the schemas in schemas/ against the examples. Needed because
+#               a schema nobody runs is just a comment. Chosen over hand-rolled checks
+#               because draft 2020-12 $ref/oneOf/if-then semantics are easy to get wrong.
+# cryptography - Ed25519 signing for the policy test vector. Not a new dependency: the
+#               server needs it anyway for Argon2id-adjacent work, CSR parsing and the
+#               internal CA, so Phase 0 is not adding surface area.
+# rfc3339-validator - without it, jsonschema SKIPS "format": "date-time" silently, so
+#               every timestamp in the corpus would go unchecked while the run still
+#               showed green. Tiny, single-purpose, and it closes a hole the validator
+#               itself reported.
+jsonschema==4.25.1
+cryptography==46.0.3
+rfc3339-validator==0.1.4

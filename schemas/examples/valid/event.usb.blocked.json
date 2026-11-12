@@ -1,0 +1,26 @@
+{
+  "schema": "ubuntuguard.event.usb.v1",
+  "event_id": "01934f2a-7c11-7a3e-8b2d-6f1c9e0a4b57",
+  "event_type": "usb_inserted",
+  "occurred_at": "2026-10-29T11:42:17Z",
+  "monotonic_ms": 13385214,
+  "device": {
+    "vendor_id": "090c",
+    "product_id": "1000",
+    "product_name": "Flash Drive",
+    "vendor_name": "Silicon Motion, Inc.",
+    "serial": "0372615100003855",
+    "interface_classes": ["08:06:50"],
+    "via_port": "3-2",
+    "connect_type": "hotplug",
+    "parent_hash": "tLMVnEcsFpOFLJGHqNiCHPSHZvE6L6dDHIQnLfwzOBU="
+  },
+  "decision": "blocked",
+  "decision_source": "policy_mode",
+  "policy": {
+    "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "policy_version": 7,
+    "matched_entry_id": null,
+    "exception_id": null
+  }
+}

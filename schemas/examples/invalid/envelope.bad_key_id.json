@@ -1,0 +1,16 @@
+{
+  "envelope_version": 1,
+  "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  "policy_version": 7,
+  "policy_type": "usb_control",
+  "scope": { "kind": "device", "id": "9a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d" },
+  "issued_at": "2026-10-29T10:00:00Z",
+  "expires_at": null,
+  "payload_b64": "eyJhIjoxfQ==",
+  "payload_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "signature": {
+    "alg": "ed25519",
+    "key_id": "rsa:not-a-valid-key-id",
+    "value_b64": "yzPshvfrp7/dOPJJ5NnJXBxRM+bKm3DaCEhoU3LufepKXwa29iJWxA8Wfr3Ha+esUVJuw1la8Fi6WXSNZ4CtBg=="
+  }
+}

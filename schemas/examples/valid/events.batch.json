@@ -1,0 +1,39 @@
+{
+  "schema": "ubuntuguard.events.batch.v1",
+  "sent_at": "2026-10-29T11:46:00Z",
+  "queue_depth": 0,
+  "events": [
+    {
+      "schema": "ubuntuguard.event.agent.v1",
+      "event_id": "01934f2d-a044-7d61-be50-9c4f2b3d7e8a",
+      "event_type": "resumed_from_sleep",
+      "occurred_at": "2026-10-29T11:40:02Z",
+      "monotonic_ms": 13200000,
+      "severity": "info",
+      "reason_code": null,
+      "detail": "checking in immediately rather than waiting out the current backoff"
+    },
+    {
+      "schema": "ubuntuguard.event.usb.v1",
+      "event_id": "01934f2a-7c11-7a3e-8b2d-6f1c9e0a4b57",
+      "event_type": "usb_inserted",
+      "occurred_at": "2026-10-29T11:42:17Z",
+      "monotonic_ms": 13385214,
+      "device": {
+        "vendor_id": "090c",
+        "product_id": "1000",
+        "product_name": "Flash Drive",
+        "serial": "0372615100003855",
+        "interface_classes": ["08:06:50"],
+        "via_port": "3-2",
+        "connect_type": "hotplug"
+      },
+      "decision": "blocked",
+      "decision_source": "policy_mode",
+      "policy": {
+        "policy_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "policy_version": 7
+      }
+    }
+  ]
+}

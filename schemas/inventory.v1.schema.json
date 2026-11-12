@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/inventory.v1.schema.json",
+  "title": "UbuntuGuard device inventory report, version 1",
+  "description": "Full-replace inventory sent by the agent. Everything here is DISCOVERED at runtime, never hardcoded. The platform-neutral fields are the ones the server reasons about; anything adapter-specific lives under adapter.details, which the server stores and displays but never interprets. That is what keeps the server free of Ubuntu-specific logic while still surfacing Ubuntu facts in the dashboard.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "collected_at", "agent", "host", "capabilities"],
+  "properties": {
+    "schema": { "const": "ubuntuguard.inventory.v1" },
+    "collected_at": { "type": "string", "format": "date-time" },
+
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "started_at"],
+      "properties": {
+        "version": { "type": "string", "maxLength": 64 },
+        "build_commit": { "type": "string", "maxLength": 64 },
+        "release_build": {
+          "type": "boolean",
+          "description": "False means dev-only environment overrides are compiled in. The dashboard flags such devices, because their effective settings may not match policy."
+        },
+        "started_at": { "type": "string", "format": "date-time" },
+        "enforcer_running": { "type": "boolean" }
+      }
+    },
+
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostname", "os", "arch"],
+      "properties": {
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "arch": { "type": "string", "maxLength": 32 },
+        "uptime_seconds": { "type": "integer", "minimum": 0 },
+        "boot_id": { "type": "string", "maxLength": 128, "description": "Changes every boot; lets the server distinguish a reboot from a restart." },
+        "machine_id_hash": {
+          "type": "string", "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of /etc/machine-id, hashed on the agent. The raw value is never transmitted."
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version_id", "kernel"],
+          "properties": {
+            "id": { "type": "string", "maxLength": 32, "description": "os-release ID, e.g. 'ubuntu'." },
+            "version_id": { "type": "string", "maxLength": 32, "description": "e.g. '24.04'. Discovered, not assumed." },
+            "pretty_name": { "type": "string", "maxLength": 128 },
+            "kernel": { "type": "string", "maxLength": 128 }
+          }
+        },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "vendor": { "type": "string", "maxLength": 128 },
+            "product_name": { "type": "string", "maxLength": 128 },
+            "product_uuid_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "virtualization": { "type": "string", "maxLength": 32, "description": "Hypervisor name or 'none'. Used as a clone-detection signal." },
+            "chassis": { "type": "string", "maxLength": 32 }
+          }
+        },
+        "network_interfaces": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "mac"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 32 },
+              "mac": { "type": "string", "pattern": "^([0-9a-f]{2}:){5}[0-9a-f]{2}$" },
+              "type": { "type": "string", "maxLength": 32 }
+            }
+          },
+          "description": "Standard IT inventory. Loopback and virtual interfaces are excluded. Note the contrast with enrollment, which sends only hashed MACs for clone fingerprinting."
+        }
+      }
+    },
+
+    "capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "supported"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["usb_control", "usb_event_stream", "usb_present_enumeration", "policy_apply", "policy_rollback", "inventory"]
+          },
+          "supported": { "type": "boolean" },
+          "detail": {
+            "type": "string", "maxLength": 256,
+            "description": "Human-readable reason when supported is false, e.g. 'usbguard not installed'. Drives the 'unsupported' status in the dashboard instead of a misleading green tick."
+          }
+        }
+      },
+      "description": "What this device can actually do. A policy targeting a capability reported unsupported resolves to status 'unsupported', never 'applied'."
+    },
+
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 32, "description": "OS adapter identity, e.g. 'ubuntu'. The server treats this as an opaque label." },
+        "details": {
+          "type": "object",
+          "maxProperties": 48,
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"] },
+          "description": "Flat adapter-specific key/value facts, e.g. usbguard_version, usbguard_daemon_active, usbguard_dbus_available, usbguard_rules_path. Deliberately flat and scalar-valued: the server stores and renders it without interpretation, so adding a macOS or Windows adapter later requires no server change."
+        }
+      }
+    },
+
+    "applied_policies": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["policy_type", "policy_version", "status"],
+        "properties": {
+          "policy_type": { "type": "string", "enum": ["usb_control", "agent_settings"] },
+          "policy_id": { "type": "string", "format": "uuid" },
+          "policy_version": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string", "enum": ["pending", "applied", "failed", "unsupported", "rolled_back"] },
+          "verified_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "What the agent believes is actually enforced, as confirmed by reading real OS state back, not by a successful exit code."
+    }
+  }
+}

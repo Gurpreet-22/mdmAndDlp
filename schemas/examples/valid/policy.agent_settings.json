@@ -1,0 +1,13 @@
+{
+  "schema": "ubuntuguard.agent_settings.v1",
+  "heartbeat_seconds": 120,
+  "heartbeat_jitter_pct": 15,
+  "backoff_initial_seconds": 5,
+  "backoff_max_seconds": 900,
+  "inventory_interval_seconds": 3600,
+  "policy_poll_seconds": 300,
+  "event_batch_max": 100,
+  "event_queue_max_events": 10000,
+  "event_queue_max_age_days": 7,
+  "log_level": "info"
+}

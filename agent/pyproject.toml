@@ -1,0 +1,124 @@
+[project]
+name = "ubuntuguard-agent"
+version = "0.1.0"
+description = "UbuntuGuard endpoint agent for managed Ubuntu laptops"
+readme = "README.md"
+
+# 3.10 is the floor so one build covers Ubuntu 22.04 (Python 3.10) and 24.04
+# (3.12). No upper cap: the agent must keep importing on a newer release rather
+# than refusing to start. 3.10 and 3.12 are both exercised by the test suite;
+# anything above that is untested.
+#
+# What targeting 3.10 costs, so nobody reintroduces it by accident:
+#   - no tomllib          -> configuration is YAML, which docs/02 specifies anyway
+#   - no datetime.UTC     -> datetime.timezone.utc everywhere
+#   - no typing.Self, no PEP 695 generics, no `type` statement, no except*
+requires-python = ">=3.10"
+
+# Dependency notes. The brief asks for a reason before anything is added.
+#
+#   cryptography - device keypair, CSR, X.509 parsing and Ed25519 policy
+#       signature verification. No stdlib alternative. Already a server
+#       dependency, so the version is a known quantity across both halves.
+#       Note the floor: Ubuntu 22.04 packages python3-cryptography 3.4.8, which
+#       is both too old to be worth trusting and carries known CVEs, so
+#       install.sh builds a virtualenv and installs a current wheel rather than
+#       depending on the distribution package.
+#   PyYAML       - /etc/ubuntuguard/agent.yaml, the format named in
+#       docs/02-policy-and-signing.md section 5.
+#
+# Deliberately ABSENT in Phase 1:
+#   httpx      - CONSIDERED AND REJECTED in Phase 2, when the HTTP client was
+#       actually written. `urllib.request` with an explicit `ssl.SSLContext`
+#       does everything the agent needs: a pinned CA, a client certificate,
+#       timeouts and no redirects. httpx would add httpcore, h11, certifi,
+#       idna, anyio and sniffio to software installed on employee laptops, in
+#       exchange for a shorter http.py. Three things decided it: the dependency
+#       count on an endpoint, that `tools/demo_api.py` already drives this API
+#       from the standard library so the pattern is proven rather than assumed,
+#       and that urllib does not follow redirects unless asked - which for a
+#       request carrying a single-use enrollment token is the safer default to
+#       start from. Revisit only if the agent needs HTTP/2 or connection reuse,
+#       neither of which one request a minute can benefit from.
+#   psutil     - every fact inventory.v1 actually requires is readable from
+#       /proc, /sys and /etc/os-release. psutil is also a C extension, so it
+#       needs a wheel or a compiler on the endpoint. Revisit only if the CPU,
+#       RAM and disk fields are added to the inventory schema.
+#   structlog  - the JSON formatter and redaction filter in logging_setup.py
+#       are shorter than the integration would be, and "no secrets in logs" is
+#       a hard requirement, so the redaction logic needs to be a plain function
+#       that a unit test can call directly.
+#   jsonschema - the schema-drift tests read the committed JSON Schema and
+#       compare values directly. A validator would be a dependency for no gain.
+dependencies = [
+    "cryptography>=42.0",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+ubuntuguard-agent = "ubuntuguard_agent.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ubuntuguard_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# "tests" is on the path so `from helpers import ...` resolves the same way
+# regardless of how pytest was invoked, rather than relying on the import-mode
+# side effect that inserts the test directory.
+pythonpath = ["src", "tests"]
+addopts = "-q --strict-markers"
+markers = [
+    # Needs a running UbuntuGuard API. Nothing in Phase 1 uses this; it is
+    # declared now so Phase 2 cannot quietly add an unmarked network test.
+    "integration: requires a running UbuntuGuard server",
+    # Needs root. Never runs by default.
+    "root: requires root privileges",
+    # Needs a physical USB device. Never runs in CI, by design.
+    "hardware: requires physical hardware",
+    # Needs a specific Ubuntu release. Skipped elsewhere, because a pass on the
+    # development box is not a pass on a target release.
+    "ubuntu: requires a target Ubuntu release",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# Matches the floor in requires-python, so ruff rejects a 3.11+ idiom rather
+# than letting it reach a 22.04 laptop.
+target-version = "py310"
+
+[tool.ruff.lint]
+# Same selection as server/pyproject.toml, so the two codebases read alike.
+select = ["E", "F", "W", "I", "N", "UP", "B", "S", "C4", "RET", "SIM", "PTH"]
+ignore = ["S104"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101 assert, S105/S106 hardcoded test credentials, S108 a /tmp path used as a
+# negative fixture.
+#
+# S311 flags the `random` module as unsuitable for cryptography, which is true
+# and irrelevant here: the scheduler tests seed a generator so that jitter and
+# backoff are deterministic. Nothing in this project uses `random` for anything
+# security-bearing - key material comes from `cryptography`, and enrollment
+# tokens are minted server-side by `secrets`.
+"tests/*" = ["S101", "S105", "S106", "S108", "S311"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["ubuntuguard_agent"]
+mypy_path = "src"
+strict = true
+warn_unreachable = true

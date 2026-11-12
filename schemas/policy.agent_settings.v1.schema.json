@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/policy.agent_settings.v1.schema.json",
+  "title": "UbuntuGuard agent_settings policy payload, version 1",
+  "description": "Server-side tunables. Every field is optional: an omitted field keeps the compiled default. The bounds are enforced in two deliberately different ways. The SERVER validates against this schema at policy-creation time and REJECTS an out-of-range value, so an admin gets immediate feedback. The AGENT validates the payload strictly for structure but treats ranges leniently and CLAMPS to its own compiled constants, emitting a settings_clamped event with the requested and applied values; an agent must never brick itself because a newer server sent a value it considers out of range. The Go constants are the runtime authority. Security invariants (HTTPS-only, signature-before-parse, 300 s clock-skew tolerance, 50 % certificate renewal) are absent from this schema because they are not configurable at all.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema"],
+  "properties": {
+    "schema": { "const": "ubuntuguard.agent_settings.v1" },
+
+    "heartbeat_seconds": {
+      "type": "integer", "minimum": 30, "maximum": 900, "default": 60,
+      "description": "Base heartbeat interval before jitter."
+    },
+    "heartbeat_jitter_pct": {
+      "type": "integer", "minimum": 0, "maximum": 50, "default": 10,
+      "description": "Random spread applied to each interval so a fleet of 50 devices does not arrive in lockstep."
+    },
+    "backoff_initial_seconds": {
+      "type": "integer", "minimum": 1, "maximum": 60, "default": 5
+    },
+    "backoff_max_seconds": {
+      "type": "integer", "minimum": 60, "maximum": 3600, "default": 900,
+      "description": "Ceiling for exponential backoff with full jitter. A network-up or resume-from-sleep event cancels the current wait instead of serving it out."
+    },
+    "inventory_interval_seconds": {
+      "type": "integer", "minimum": 300, "maximum": 86400, "default": 3600
+    },
+    "policy_poll_seconds": {
+      "type": "integer", "minimum": 60, "maximum": 3600, "default": 300
+    },
+    "event_batch_max": {
+      "type": "integer", "minimum": 1, "maximum": 500, "default": 100
+    },
+    "event_queue_max_events": {
+      "type": "integer", "minimum": 100, "maximum": 10000, "default": 10000,
+      "description": "Durable SQLite queue cap. On overflow the oldest events are dropped and a single queue_overflow event records how many were lost, so the gap is visible rather than silent."
+    },
+    "event_queue_max_age_days": {
+      "type": "integer", "minimum": 1, "maximum": 7, "default": 7
+    },
+    "log_level": {
+      "type": "string", "enum": ["error", "warn", "info", "debug"], "default": "info",
+      "description": "debug raises verbosity only. No level ever logs tokens, keys, certificates or signature values."
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "ubuntuguard.usb_control.v1",
+  "mode": "block_all_storage",
+  "protected_classes": ["mass_storage"],
+  "always_allow_classes": ["hid", "hub", "audio", "video", "billboard", "network", "smartcard"],
+  "allowlist": [],
+  "exceptions": [
+    {
+      "exception_id": "b1e4f0a2-7d3c-4e51-9f68-2a0c7d9e4b11",
+      "match": {
+        "vendor_id": "0951",
+        "product_id": "1666",
+        "serial": null,
+        "serial_match": "any"
+      },
+      "reason": "Vendor on site to deliver signed firmware images, approved by CISO ticket SEC-4821",
+      "created_by": "security-analyst",
+      "created_at": "2026-10-29T08:00:00Z",
+      "expires_at": "2026-10-29T16:00:00Z"
+    }
+  ],
+  "reporting": {
+    "report_allowed": true,
+    "report_blocked": true,
+    "report_present_at_start": true
+  },
+  "enforcement": {
+    "apply_to_present_devices": true
+  }
+}

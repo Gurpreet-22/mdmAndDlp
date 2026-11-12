@@ -1,0 +1,14 @@
+{
+  "schema": "ubuntuguard.event.usb.v1",
+  "event_id": "01934f2a-7c11-7a3e-8b2d-6f1c9e0a4b59",
+  "event_type": "usb_inserted",
+  "occurred_at": "2026-10-29T11:42:17Z",
+  "device": {
+    "vendor_id": "0x090C",
+    "product_id": "1000",
+    "serial": null,
+    "interface_classes": ["08:06:50"]
+  },
+  "decision": "blocked",
+  "decision_source": "policy_mode"
+}

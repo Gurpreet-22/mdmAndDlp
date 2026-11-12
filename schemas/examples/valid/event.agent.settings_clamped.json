@@ -1,0 +1,21 @@
+{
+  "schema": "ubuntuguard.event.agent.v1",
+  "event_id": "01934f2c-9e33-7c50-ad4f-8b3e1a2c6d79",
+  "event_type": "settings_clamped",
+  "occurred_at": "2026-10-29T08:00:11Z",
+  "monotonic_ms": 8420,
+  "severity": "warning",
+  "reason_code": "value_clamped",
+  "detail": "heartbeat_seconds outside compiled bounds; applied the minimum instead",
+  "fields": {
+    "setting": "heartbeat_seconds",
+    "requested": 5,
+    "applied": 30,
+    "bound": "min"
+  },
+  "policy": {
+    "policy_id": "5d1a9c3e-2b74-4f80-8e16-7c9d0a1b2e34",
+    "policy_type": "agent_settings",
+    "policy_version": 3
+  }
+}

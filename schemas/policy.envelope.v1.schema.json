@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/policy.envelope.v1.schema.json",
+  "title": "UbuntuGuard signed policy envelope, version 1",
+  "description": "Transport wrapper for a signed policy. The payload travels base64-encoded so that no JSON layer between the signer and the verifier can reorder or re-escape the signed bytes. The agent MUST verify the Ed25519 signature over the decoded payload bytes BEFORE parsing them. See docs/02-policy-and-signing.md for the normative signing input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "envelope_version",
+    "policy_id",
+    "policy_version",
+    "policy_type",
+    "scope",
+    "issued_at",
+    "expires_at",
+    "payload_b64",
+    "payload_sha256",
+    "signature"
+  ],
+  "properties": {
+    "envelope_version": {
+      "const": 1,
+      "description": "Bumped only for breaking envelope changes."
+    },
+    "policy_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "policy_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Strictly increasing per (policy_type, scope). The agent rejects any version that is not greater than the last applied version, which is what blocks downgrade and replay."
+    },
+    "policy_type": {
+      "type": "string",
+      "enum": ["usb_control", "agent_settings"]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["device", "group", "fleet"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Device UUID for kind=device, group id for kind=group, the literal 'all' for kind=fleet. The agent rejects an envelope whose scope does not resolve to itself."
+        }
+      }
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC. Rejected if more than 300 s in the future."
+    },
+    "expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "RFC 3339 UTC or null for no expiry. Rejected if more than 300 s in the past."
+    },
+    "payload_b64": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 87400,
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+      "description": "Standard base64 (RFC 4648 §4) of the exact signed payload bytes. Decoded size is capped at 64 KiB."
+    },
+    "payload_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "ADVISORY ONLY. Lowercase hex SHA-256 of the decoded payload bytes, for display, logs and dedupe. It is deliberately NOT part of the signing input; the agent recomputes it and fails closed on mismatch, but authenticity rests solely on the signature."
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "value_b64"],
+      "properties": {
+        "alg": {
+          "const": "ed25519",
+          "description": "Pure Ed25519 (RFC 8032), not Ed25519ph."
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^ed25519:[0-9a-f]{16}$",
+          "description": "'ed25519:' followed by the first 16 hex chars of SHA-256 over the raw 32-byte public key. The agent rejects a key_id that is not in its pinned trust set."
+        },
+        "value_b64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{86}==$",
+          "description": "Base64 of the 64-byte Ed25519 signature over SIG_INPUT."
+        }
+      }
+    }
+  }
+}

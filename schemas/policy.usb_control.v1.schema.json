@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ubuntuguard.invalid/schemas/policy.usb_control.v1.schema.json",
+  "title": "UbuntuGuard usb_control policy payload, version 1",
+  "description": "Declarative USB control intent. This payload contains DATA ONLY: typed device matchers and a mode. It never contains usbguard rule text, shell strings, file paths or commands; enforcerd derives the OS rules itself from these typed fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mode", "protected_classes", "always_allow_classes", "allowlist", "exceptions", "reporting"],
+  "properties": {
+    "schema": {
+      "const": "ubuntuguard.usb_control.v1"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["monitor_only", "allowlist_enforce", "block_all_storage"],
+      "description": "monitor_only: observe and report, change nothing. allowlist_enforce: permit only allowlisted or excepted devices in protected_classes, block the rest. block_all_storage: block every device in protected_classes, allowlist ignored (exceptions still apply)."
+    },
+    "protected_classes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["mass_storage", "image"]
+      },
+      "description": "USB interface classes subject to enforcement. 'mass_storage' is USB class 08. 'image' is class 06 (PTP/MTP, i.e. phones and cameras) and is OFF by default until the spike shows it can be blocked without breaking normal phone charging."
+    },
+    "always_allow_classes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["hid", "hub", "audio", "video", "printer", "network", "smartcard", "wireless", "billboard", "cdc", "physical", "vendor_specific"]
+      },
+      "allOf": [
+        { "contains": { "const": "hid" } },
+        { "contains": { "const": "hub" } }
+      ],
+      "description": "Never-block classes. 'hid' (keyboards, mice) and 'hub' are REQUIRED by schema so that no policy can lock a user out of their own laptop. USB-C docks additionally need 'billboard', 'network', 'audio' and 'video'."
+    },
+    "allowlist": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/allowlistEntry" }
+    },
+    "exceptions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/exception" },
+      "description": "Time-bound admin grants. Maximum duration 24 h. JSON Schema cannot express 'expires_at - created_at <= 24h', so that bound is enforced semantically by BOTH the server (on create) and the agent (on apply), and is covered by test_exception_max_duration."
+    },
+    "reporting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report_allowed", "report_blocked", "report_present_at_start"],
+      "properties": {
+        "report_allowed": { "type": "boolean", "default": true },
+        "report_blocked": { "type": "boolean", "default": true },
+        "report_present_at_start": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report devices already attached when the agent or daemon starts. Needed because usbguard's DevicePresenceChanged signal for already-present devices does not reliably reach bus clients, so the agent reconciles with listDevices at startup instead of relying on signals alone."
+        }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apply_to_present_devices": {
+          "type": "boolean",
+          "default": true,
+          "description": "Evaluate the policy against devices that were already attached, rather than leaving them in their current state."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "usbId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{4}$",
+      "description": "Lowercase 4-digit hex USB vendor or product id, as reported by usbguard."
+    },
+    "deviceMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vendor_id", "product_id", "serial_match"],
+      "properties": {
+        "vendor_id": { "$ref": "#/$defs/usbId" },
+        "product_id": { "$ref": "#/$defs/usbId" },
+        "serial": {
+          "type": ["string", "null"],
+          "maxLength": 128,
+          "description": "Device serial as reported by usbguard, or null."
+        },
+        "serial_match": {
+          "type": "string",
+          "enum": ["exact", "any"],
+          "description": "'exact' pins one physical stick and requires a serial. 'any' matches every unit of that vendor/product model and is the only option for the many cheap sticks that report no serial at all; it is strictly weaker and the dashboard must label it as such."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "serial_match": { "const": "exact" } }, "required": ["serial_match"] },
+          "then": { "properties": { "serial": { "type": "string", "minLength": 1 } }, "required": ["serial"] }
+        }
+      ]
+    },
+    "allowlistEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_id", "match", "label", "added_by", "added_at"],
+      "properties": {
+        "entry_id": { "type": "string", "format": "uuid" },
+        "match": { "$ref": "#/$defs/deviceMatch" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "added_by": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "added_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exception_id", "match", "reason", "created_by", "created_at", "expires_at"],
+      "properties": {
+        "exception_id": { "type": "string", "format": "uuid" },
+        "match": { "$ref": "#/$defs/deviceMatch" },
+        "reason": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 500,
+          "description": "Required justification. Short strings are rejected to discourage 'test' and 'asdf'."
+        },
+        "created_by": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Absolute UTC expiry. Stored in signed policy state so expiry survives an agent restart and cannot be extended by changing the local clock beyond the 300 s skew tolerance."
+        }
+      }
+    }
+  }
+}
