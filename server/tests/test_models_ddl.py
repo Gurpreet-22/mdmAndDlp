@@ -62,6 +62,8 @@ def test_expected_tables_exist() -> None:
         "incidents",
         "usb_exceptions",
         "audit_logs",
+        "employees",
+        "device_assignments",
     }
 
 

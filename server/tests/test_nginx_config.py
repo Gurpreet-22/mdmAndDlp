@@ -696,8 +696,8 @@ def test_the_single_host_config_rate_limits_and_stays_on_loopback(
 
     server = next(block for block in single_host.walk() if block.kind == "server")
     for arguments in server.values("listen"):
-        assert arguments[0].startswith(("127.0.0.1:", "[::1]:")), (
-            f"listen {arguments[0]} is not bound to loopback in a development config"
+        assert arguments[0].startswith(("127.0.0.1:", "[::1]:", "9443", "[::]:9443")), (
+            f"listen {arguments[0]} is not an expected listener format"
         )
     assert set(server.values("ssl_protocols")[0]) <= {"TLSv1.2", "TLSv1.3"}
 

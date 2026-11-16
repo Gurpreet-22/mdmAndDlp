@@ -129,6 +129,12 @@ ACTIONS = frozenset(
         "usb_exception_revoked",
         "incident_status_changed",
         "audit_exported",
+        "employee_created",
+        "employee_updated",
+        "employee_deleted",
+        "device_assigned",
+        "device_unassigned",
+        "device_offline_alert",
     }
 )
 

@@ -404,6 +404,8 @@ class DeviceSummary(BaseModel):
     model: str | None
     assigned_to_name: str | None
     assigned_to_email: str | None
+    department: str | None = None
+    assigned_to_id: uuid.UUID | None = None
     platform: str | None
     asset_tag: str | None
     primary_adapter_ip: str | None = Field(
@@ -452,6 +454,8 @@ class RegisterDeviceRequest(StrictModel):
     #: exactly what turns up in a corporate fleet. Send null rather than "" for
     #: "not recorded" - a blank-but-present address is rejected.
     assigned_to_email: AdminEmail | None = None
+    department: Annotated[str, StringConstraints(max_length=120)] | None = None
+    assigned_to_id: uuid.UUID | None = None
     asset_tag: Annotated[str, StringConstraints(max_length=64)] | None = None
     issue_enrollment_token: bool = Field(
         default=True,
@@ -599,3 +603,76 @@ class ChainVerificationResponse(BaseModel):
     checked: int
     broken_at_seq: int | None
     reason: str | None
+
+
+# --------------------------------------------------------------------------- #
+# Employee & Device Assignment
+# --------------------------------------------------------------------------- #
+
+
+class EmployeeCreateRequest(StrictModel):
+    full_name: Annotated[str, StringConstraints(min_length=1, max_length=120)]
+    email: AdminEmail
+    department: Annotated[str, StringConstraints(max_length=120)] | None = None
+    job_title: Annotated[str, StringConstraints(max_length=120)] | None = None
+    phone: Annotated[str, StringConstraints(max_length=32)] | None = None
+
+
+class EmployeeUpdateRequest(StrictModel):
+    full_name: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
+    email: AdminEmail | None = None
+    department: Annotated[str, StringConstraints(max_length=120)] | None = None
+    job_title: Annotated[str, StringConstraints(max_length=120)] | None = None
+    phone: Annotated[str, StringConstraints(max_length=32)] | None = None
+    status: Literal["active", "suspended", "offboarded"] | None = None
+
+
+class EmployeeResponse(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    email: str
+    department: str | None
+    job_title: str | None
+    phone: str | None
+    status: str
+    assigned_device_count: int = 0
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class AssignDeviceRequest(StrictModel):
+    employee_id: uuid.UUID | None = None
+    assigned_to_name: Annotated[str, StringConstraints(min_length=1, max_length=120)]
+    assigned_to_email: AdminEmail | None = None
+    department: Annotated[str, StringConstraints(max_length=120)] | None = None
+    notes: Annotated[str, StringConstraints(max_length=500)] | None = None
+
+
+class DeviceAssignmentResponse(BaseModel):
+    id: uuid.UUID
+    device_id: uuid.UUID
+    employee_id: uuid.UUID | None
+    assigned_to_name: str
+    assigned_to_email: str | None
+    department: str | None
+    notes: str | None
+    assigned_at: dt.datetime
+    unassigned_at: dt.datetime | None
+    assigned_by: uuid.UUID | None
+    unassigned_by: uuid.UUID | None
+
+
+# --------------------------------------------------------------------------- #
+# Device Offline Alerts
+# --------------------------------------------------------------------------- #
+
+
+class CheckOfflineDevicesRequest(StrictModel):
+    threshold_seconds: int = Field(default=900, ge=60, le=86400 * 30)
+
+
+class CheckOfflineDevicesResponse(BaseModel):
+    checked_count: int
+    flagged_offline_count: int
+    new_incidents_created: int
+    device_ids: list[uuid.UUID]

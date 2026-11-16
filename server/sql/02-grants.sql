@@ -94,6 +94,12 @@ GRANT UPDATE ON incidents TO ubuntuguard_app;
 -- Early revocation of a time-bound exception.
 GRANT UPDATE ON usb_exceptions TO ubuntuguard_app;
 
+-- Employee updates and deletion.
+GRANT UPDATE, DELETE ON employees TO ubuntuguard_app;
+
+-- Closing previous device assignments on re-assign or unassign.
+GRANT UPDATE ON device_assignments TO ubuntuguard_app;
+
 -- Deliberately NOT granted anything beyond SELECT, INSERT:
 --   audit_logs           append-only, the whole point
 --   policies             immutable versions; a change is a new row

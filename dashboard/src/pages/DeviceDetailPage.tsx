@@ -3,7 +3,12 @@ import { Link, useParams } from "react-router-dom";
 
 import ErrorBanner from "../components/ErrorBanner";
 import { api } from "../api/client";
-import type { DeviceDetail } from "../api/client";
+import type {
+  AssignDeviceRequest,
+  DeviceAssignment,
+  DeviceDetail,
+  Employee,
+} from "../api/client";
 import { useAuth } from "../auth";
 
 const MIN_REASON_LENGTH = 8;
@@ -21,14 +26,33 @@ export default function DeviceDetailPage() {
   const { deviceId = "" } = useParams();
   const { can } = useAuth();
   const [device, setDevice] = useState<DeviceDetail | null>(null);
+  const [assignments, setAssignments] = useState<DeviceAssignment[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Assign Modal state
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [selectedEmpId, setSelectedEmpId] = useState("");
+  const [assignName, setAssignName] = useState("");
+  const [assignEmail, setAssignEmail] = useState("");
+  const [assignDept, setAssignDept] = useState("");
+  const [assignNotes, setAssignNotes] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      setDevice(await api.getDevice(deviceId));
+      const [dev, hist, emps] = await Promise.all([
+        api.getDevice(deviceId),
+        api.getDeviceAssignments(deviceId),
+        api.listEmployees(),
+      ]);
+      setDevice(dev);
+      setAssignments(hist);
+      setEmployees(emps);
     } catch (caught) {
       setError(caught);
     }
@@ -44,6 +68,64 @@ export default function DeviceDetailPage() {
     try {
       await api.revokeDevice(deviceId, reason);
       setReason("");
+      setNotice("Device successfully revoked.");
+      await load();
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAssignModal() {
+    setSelectedEmpId(device?.assigned_to_id ?? "");
+    setAssignName(device?.assigned_to_name ?? "");
+    setAssignEmail(device?.assigned_to_email ?? "");
+    setAssignDept(device?.department ?? "");
+    setAssignNotes("");
+    setIsAssignOpen(true);
+  }
+
+  function onSelectEmployee(empId: string) {
+    setSelectedEmpId(empId);
+    const emp = employees.find((e) => e.id === empId);
+    if (emp) {
+      setAssignName(emp.full_name);
+      setAssignEmail(emp.email);
+      setAssignDept(emp.department ?? "");
+    }
+  }
+
+  async function handleAssignSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setAssignBusy(true);
+    setError(null);
+    try {
+      const body: AssignDeviceRequest = {
+        employee_id: selectedEmpId || null,
+        assigned_to_name: assignName.trim(),
+        assigned_to_email: assignEmail.trim() || null,
+        department: assignDept.trim() || null,
+        notes: assignNotes.trim() || null,
+      };
+      await api.assignDevice(deviceId, body);
+      setIsAssignOpen(false);
+      setNotice(`Device assigned to ${body.assigned_to_name}.`);
+      await load();
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
+  async function handleUnassign() {
+    if (!window.confirm("Unassign this device from the current employee?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.unassignDevice(deviceId);
+      setNotice("Device unassigned.");
       await load();
     } catch (caught) {
       setError(caught);
@@ -87,6 +169,11 @@ export default function DeviceDetailPage() {
       </div>
 
       <ErrorBanner error={error} />
+      {notice && (
+        <div className="banner ok" role="status">
+          <p>{notice}</p>
+        </div>
+      )}
 
       {device.clone_suspected && (
         <div className="banner warn">
@@ -115,13 +202,37 @@ export default function DeviceDetailPage() {
 
       <div className="grid-two">
         <div className="card">
-          <h2>Assignment</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h2>Assignment</h2>
+            {can("enrollment_token_manage") && device.status !== "revoked" && (
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="button primary small"
+                  onClick={openAssignModal}
+                >
+                  {device.assigned_to_name ? "Reassign" : "Assign"}
+                </button>
+                {device.assigned_to_name && (
+                  <button
+                    type="button"
+                    className="button subtle small"
+                    onClick={handleUnassign}
+                    disabled={busy}
+                  >
+                    Unassign
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <dl>
             <Field label="Device name" value={device.display_name} />
             <Field label="Manufacturer" value={device.manufacturer} />
             <Field label="Model" value={device.model} />
             <Field label="Issued to" value={device.assigned_to_name} />
             <Field label="Employee email" value={device.assigned_to_email} />
+            <Field label="Department" value={device.department} />
             <Field label="Asset tag" value={device.asset_tag} mono />
             <Field label="Platform" value={device.platform} />
             <Field label="Registered" value={device.registered_at} />
@@ -184,15 +295,57 @@ export default function DeviceDetailPage() {
             authorise a device. Full inventory reporting arrives with the agent in Phase 2.
           </p>
         </div>
+
+        <div className="card">
+          <h2>USB policy</h2>
+          <p className="muted">
+            No USB policy is assigned, because USB enforcement is not built yet. When it is,
+            a device without usbguard will report this capability as{" "}
+            <code>unsupported</code> rather than showing a false green.
+          </p>
+        </div>
       </div>
 
-      <div className="card">
-        <h2>USB policy</h2>
-        <p className="muted">
-          No USB policy is assigned, because USB enforcement is not built yet. When it is,
-          a device without usbguard will report this capability as{" "}
-          <code>unsupported</code> rather than showing a false green.
-        </p>
+      {/* Assignment History */}
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h2>Ownership & Assignment History</h2>
+        {assignments.length === 0 ? (
+          <p className="muted small">No assignment history recorded yet for this device.</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Assigned To</th>
+                <th>Department</th>
+                <th>Assigned Date</th>
+                <th>Unassigned Date</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assignments.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    <strong>{a.assigned_to_name}</strong>
+                    {a.assigned_to_email && (
+                      <div className="muted small">{a.assigned_to_email}</div>
+                    )}
+                  </td>
+                  <td>{a.department ?? "—"}</td>
+                  <td>{a.assigned_at}</td>
+                  <td>
+                    {a.unassigned_at ? (
+                      a.unassigned_at
+                    ) : (
+                      <span className="pill online">Current</span>
+                    )}
+                  </td>
+                  <td>{a.notes ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {device.status === "revoked" ? (
@@ -210,7 +363,7 @@ export default function DeviceDetailPage() {
         </div>
       ) : (
         can("device_revoke") && (
-          <div className="card danger">
+          <div className="card danger" style={{ marginTop: "1rem" }}>
             <h2>Revoke this device</h2>
             <p className="muted">
               Takes effect on the device's next request. The reason is recorded in the
@@ -239,6 +392,97 @@ export default function DeviceDetailPage() {
             )}
           </div>
         )
+      )}
+
+      {/* Assign / Reassign Dialog */}
+      {isAssignOpen && (
+        <div className="dialog-overlay">
+          <div className="dialog card">
+            <h2>{device.assigned_to_name ? "Reassign Device" : "Assign Device"}</h2>
+            <form onSubmit={handleAssignSubmit}>
+              {employees.length > 0 && (
+                <div className="form-group">
+                  <label htmlFor="select-emp">Choose Existing Employee</label>
+                  <select
+                    id="select-emp"
+                    value={selectedEmpId}
+                    onChange={(e) => onSelectEmployee(e.target.value)}
+                  >
+                    <option value="">— Or enter manually below —</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.full_name} ({e.email}){e.department ? ` - ${e.department}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="assign-name">Employee Full Name *</label>
+                <input
+                  id="assign-name"
+                  type="text"
+                  required
+                  value={assignName}
+                  onChange={(e) => setAssignName(e.target.value)}
+                  placeholder="e.g. Alex Mercer"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="assign-email">Employee Email</label>
+                <input
+                  id="assign-email"
+                  type="email"
+                  value={assignEmail}
+                  onChange={(e) => setAssignEmail(e.target.value)}
+                  placeholder="alex@company.com"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="assign-dept">Department</label>
+                <input
+                  id="assign-dept"
+                  type="text"
+                  value={assignDept}
+                  onChange={(e) => setAssignDept(e.target.value)}
+                  placeholder="e.g. Security, Devops"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="assign-notes">Assignment Notes</label>
+                <input
+                  id="assign-notes"
+                  type="text"
+                  value={assignNotes}
+                  onChange={(e) => setAssignNotes(e.target.value)}
+                  placeholder="e.g. Handed over at headquarters"
+                />
+              </div>
+
+              <div className="dialog-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1.25rem" }}>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setIsAssignOpen(false)}
+                  disabled={assignBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={assignBusy}
+                >
+                  {assignBusy ? "Saving…" : "Save Assignment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </section>
   );

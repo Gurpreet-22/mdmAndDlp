@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ubuntuguard import problems
-from ubuntuguard.api.v1 import audit_log, auth, devices, enrollment, installer, users
+from ubuntuguard.api.v1 import audit_log, auth, devices, employees, enrollment, installer, users
 
 
 def build_router() -> APIRouter:
@@ -29,6 +29,7 @@ def build_router() -> APIRouter:
     # --- Admin plane: bearer token, capability-checked ------------------- #
     router.include_router(auth.router)
     router.include_router(users.router)
+    router.include_router(employees.router)
     router.include_router(enrollment.admin_router)
     router.include_router(devices.admin_router)
     router.include_router(audit_log.router)

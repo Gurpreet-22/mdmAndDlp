@@ -13,6 +13,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const links: { to: string; label: string; visible: boolean }[] = [
     { to: "/devices", label: "Devices", visible: can("device_read") },
+    { to: "/employees", label: "Employees", visible: can("device_read") },
     { to: "/enrollment", label: "Enrollment", visible: can("enrollment_token_manage") },
     { to: "/audit", label: "Audit log", visible: can("audit_read") },
     { to: "/users", label: "Administrators", visible: can("manage_users") },

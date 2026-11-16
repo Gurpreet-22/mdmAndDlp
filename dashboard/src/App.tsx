@@ -6,6 +6,7 @@ import AuditLogPage from "./pages/AuditLogPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import DeviceDetailPage from "./pages/DeviceDetailPage";
 import DevicesPage from "./pages/DevicesPage";
+import EmployeesPage from "./pages/EmployeesPage";
 import EnrollPage from "./pages/EnrollPage";
 import EnrollmentTokensPage from "./pages/EnrollmentTokensPage";
 import LoginPage from "./pages/LoginPage";
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/devices" replace />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/devices/:deviceId" element={<DeviceDetailPage />} />
+        <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/enrollment" element={<EnrollmentTokensPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/users" element={<UsersPage />} />

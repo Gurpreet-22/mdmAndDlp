@@ -27,8 +27,12 @@ from ubuntuguard.constants import HEARTBEAT_JITTER_PCT, HEARTBEAT_SECONDS, PAGE_
 from ubuntuguard.liveness import is_online
 from ubuntuguard.models import Device
 from ubuntuguard.schemas import (
+    AssignDeviceRequest,
     CertificateRenewRequest,
     CertificateRenewResponse,
+    CheckOfflineDevicesRequest,
+    CheckOfflineDevicesResponse,
+    DeviceAssignmentResponse,
     DeviceCounts,
     DeviceDetail,
     DeviceSummary,
@@ -71,6 +75,8 @@ def _summary(device: Device, now: dt.datetime) -> DeviceSummary:
         model=device.model,
         assigned_to_name=device.assigned_to_name,
         assigned_to_email=device.assigned_to_email,
+        department=device.department,
+        assigned_to_id=device.assigned_to_id,
         platform=device.platform,
         asset_tag=device.asset_tag,
         primary_adapter_ip=device.primary_adapter_ip,
@@ -174,6 +180,8 @@ def register_device(
         model=body.model,
         assigned_to_name=body.assigned_to_name,
         assigned_to_email=body.assigned_to_email,
+        department=body.department,
+        assigned_to_id=body.assigned_to_id,
         asset_tag=body.asset_tag,
         now=now,
     )
@@ -284,6 +292,144 @@ def revoke_device(
     session.commit()
 
 
+@admin_router.post(":check-offline", response_model=CheckOfflineDevicesResponse)
+def check_offline_devices(
+    body: CheckOfflineDevicesRequest,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.DEVICE_READ)),
+) -> CheckOfflineDevicesResponse:
+    """Scan fleet for devices that stopped checking in and raise offline incidents."""
+    checked, flagged, new_incidents, device_ids = repositories.check_offline_devices(
+        session,
+        threshold_seconds=body.threshold_seconds,
+    )
+    if new_incidents > 0:
+        session.commit()
+    return CheckOfflineDevicesResponse(
+        checked_count=checked,
+        flagged_offline_count=flagged,
+        new_incidents_created=new_incidents,
+        device_ids=device_ids,
+    )
+
+
+@admin_router.post("/{device_id}:assign", response_model=DeviceAssignmentResponse)
+def assign_device(
+    device_id: uuid.UUID,
+    body: AssignDeviceRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+) -> DeviceAssignmentResponse:
+    """Assign or reassign a device to an employee or department."""
+    device = repositories.get_device(session, device_id)
+    if device is None:
+        raise problems.not_found("device")
+    if device.status == "revoked":
+        raise problems.conflict("device_already_revoked", "Cannot assign a revoked device.")
+
+    user_id = uuid.UUID(principal.user_id) if principal.user_id else None
+    assignment = repositories.assign_device(
+        session,
+        device=device,
+        assigned_to_name=body.assigned_to_name,
+        assigned_to_email=body.assigned_to_email,
+        department=body.department,
+        employee_id=body.employee_id,
+        assigned_by=user_id,
+        notes=body.notes,
+    )
+    audit.append(
+        session,
+        action="device_assigned",
+        actor_id=principal.user_id,
+        actor_role=principal.role.value,
+        target_type="device",
+        target_id=str(device_id),
+        request_id=getattr(request.state, "request_id", None),
+        detail={
+            "assigned_to_name": body.assigned_to_name,
+            "assigned_to_email": body.assigned_to_email,
+            "department": body.department,
+            "employee_id": str(body.employee_id) if body.employee_id else None,
+        },
+    )
+    session.commit()
+    return DeviceAssignmentResponse(
+        id=assignment.id,
+        device_id=assignment.device_id,
+        employee_id=assignment.employee_id,
+        assigned_to_name=assignment.assigned_to_name,
+        assigned_to_email=assignment.assigned_to_email,
+        department=assignment.department,
+        notes=assignment.notes,
+        assigned_at=assignment.assigned_at,
+        unassigned_at=assignment.unassigned_at,
+        assigned_by=assignment.assigned_by,
+        unassigned_by=assignment.unassigned_by,
+    )
+
+
+@admin_router.post("/{device_id}:unassign", status_code=204)
+def unassign_device(
+    device_id: uuid.UUID,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+) -> None:
+    """Unassign a device without revoking its certificate."""
+    device = repositories.get_device(session, device_id)
+    if device is None:
+        raise problems.not_found("device")
+
+    user_id = uuid.UUID(principal.user_id) if principal.user_id else None
+    old_name = device.assigned_to_name
+    old_email = device.assigned_to_email
+    repositories.unassign_device(session, device=device, unassigned_by=user_id)
+
+    audit.append(
+        session,
+        action="device_unassigned",
+        actor_id=principal.user_id,
+        actor_role=principal.role.value,
+        target_type="device",
+        target_id=str(device_id),
+        request_id=getattr(request.state, "request_id", None),
+        detail={"previously_assigned_to": old_name, "previously_assigned_email": old_email},
+    )
+    session.commit()
+
+
+@admin_router.get("/{device_id}/assignments", response_model=list[DeviceAssignmentResponse])
+def get_device_assignments(
+    device_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.DEVICE_READ)),
+) -> list[DeviceAssignmentResponse]:
+    """Get the full ownership and assignment history for a device."""
+    device = repositories.get_device(session, device_id)
+    if device is None:
+        raise problems.not_found("device")
+
+    rows = repositories.list_device_assignments(session, device_id)
+    return [
+        DeviceAssignmentResponse(
+            id=row.id,
+            device_id=row.device_id,
+            employee_id=row.employee_id,
+            assigned_to_name=row.assigned_to_name,
+            assigned_to_email=row.assigned_to_email,
+            department=row.department,
+            notes=row.notes,
+            assigned_at=row.assigned_at,
+            unassigned_at=row.unassigned_at,
+            assigned_by=row.assigned_by,
+            unassigned_by=row.unassigned_by,
+        )
+        for row in rows
+    ]
+
+
 @device_router.post("/certificate:renew", response_model=CertificateRenewResponse)
 def renew_certificate(
     body: CertificateRenewRequest,
@@ -352,6 +498,7 @@ def heartbeat(
         agent_version=body.agent_version,
         primary_adapter_ip=body.primary_adapter_ip,
     )
+    repositories.resolve_offline_incidents_for_device(session, row.id)
 
     renew_after: dt.datetime | None = None
     certificate = device.certificate.certificate if device.certificate else None

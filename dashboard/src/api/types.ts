@@ -150,6 +150,8 @@ export interface DeviceSummary {
   model: string | null;
   assigned_to_name: string | null;
   assigned_to_email: string | null;
+  department: string | null;
+  assigned_to_id: string | null;
   platform: string | null;
   asset_tag: string | null;
   /** Self-reported by the agent. Informational only, never used to authorise. */
@@ -173,6 +175,8 @@ export interface RegisterDeviceRequest {
   model?: string | null;
   assigned_to_name?: string | null;
   assigned_to_email?: string | null;
+  department?: string | null;
+  assigned_to_id?: string | null;
   asset_tag?: string | null;
   issue_enrollment_token?: boolean;
   token_ttl_seconds?: number;
@@ -279,4 +283,63 @@ export interface DeviceListQuery {
   /** True for enrolled only, false for those still awaiting enrollment. */
   enrolled?: boolean | undefined;
   limit?: number | undefined;
+}
+
+export interface Employee {
+  id: string;
+  full_name: string;
+  email: string;
+  department: string | null;
+  job_title: string | null;
+  phone: string | null;
+  status: "active" | "suspended" | "offboarded";
+  assigned_device_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateEmployeeRequest {
+  full_name: string;
+  email: string;
+  department?: string | null;
+  job_title?: string | null;
+  phone?: string | null;
+}
+
+export interface UpdateEmployeeRequest {
+  full_name?: string | null;
+  email?: string | null;
+  department?: string | null;
+  job_title?: string | null;
+  phone?: string | null;
+  status?: "active" | "suspended" | "offboarded" | null;
+}
+
+export interface AssignDeviceRequest {
+  employee_id?: string | null;
+  assigned_to_name: string;
+  assigned_to_email?: string | null;
+  department?: string | null;
+  notes?: string | null;
+}
+
+export interface DeviceAssignment {
+  id: string;
+  device_id: string;
+  employee_id: string | null;
+  assigned_to_name: string;
+  assigned_to_email: string | null;
+  department: string | null;
+  notes: string | null;
+  assigned_at: string;
+  unassigned_at: string | null;
+  assigned_by: string | null;
+  unassigned_by: string | null;
+}
+
+export interface CheckOfflineDevicesResponse {
+  checked_count: number;
+  flagged_offline_count: number;
+  new_incidents_created: number;
+  device_ids: string[];
 }

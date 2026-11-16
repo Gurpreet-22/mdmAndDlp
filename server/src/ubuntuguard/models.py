@@ -76,7 +76,9 @@ INCIDENT_KINDS = (
     "enforcer_unavailable",
     "capability_lost",
     "audit_chain_broken",
+    "device_offline",
 )
+EMPLOYEE_STATUSES = ("active", "suspended", "offboarded")
 TOKEN_KINDS = ("access", "refresh")
 EVENT_KINDS = ("usb", "agent")
 SERIAL_MATCH_MODES = ("exact", "any")
@@ -269,6 +271,10 @@ class Device(Base):
     #: not a foreign key: employees are not administrators and have no account.
     assigned_to_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     assigned_to_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    assigned_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
     platform: Mapped[str | None] = mapped_column(String(16), nullable=True)
     asset_tag: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -658,6 +664,56 @@ class AuditLog(Base):
     detail_json: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     prev_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     entry_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+    __table_args__ = (
+        CheckConstraint(_in_list("status", EMPLOYEE_STATUSES), name="status_valid"),
+        Index("ix_employees_email", "email", unique=True),
+        Index("ix_employees_department", "department"),
+        Index("ix_employees_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    job_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active"
+    )
+    created_at: Mapped[dt.datetime] = timestamp(nullable=False, server_default=func.now())
+    updated_at: Mapped[dt.datetime] = timestamp(nullable=False, server_default=func.now())
+
+
+class DeviceAssignment(Base):
+    __tablename__ = "device_assignments"
+    __table_args__ = (
+        Index("ix_device_assignments_device_id_assigned_at", "device_id", "assigned_at"),
+        Index("ix_device_assignments_employee_id", "employee_id"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_to_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    assigned_to_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    assigned_at: Mapped[dt.datetime] = timestamp(nullable=False, server_default=func.now())
+    unassigned_at: Mapped[dt.datetime | None] = timestamp(nullable=True)
+    assigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    unassigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 #: Every table, for the DDL tests and for Alembic's autogenerate target.

@@ -34,6 +34,8 @@ from ubuntuguard.constants import (
 from ubuntuguard.models import (
     AuthToken,
     Device,
+    DeviceAssignment,
+    Employee,
     EnrollmentAttempt,
     EnrollmentToken,
     Incident,
@@ -564,6 +566,8 @@ def register_device(
     model: str | None = None,
     assigned_to_name: str | None = None,
     assigned_to_email: str | None = None,
+    department: str | None = None,
+    assigned_to_id: uuid.UUID | None = None,
     asset_tag: str | None = None,
     now: dt.datetime | None = None,
 ) -> Device:
@@ -574,6 +578,7 @@ def register_device(
     hostname, OS or fingerprint is set: those are facts only the device can
     report, and inventing them here would make the fleet list a guess.
     """
+    assigned_time = now or dt.datetime.now(dt.UTC)
     device = Device(
         status="pending",
         hostname=None,
@@ -584,12 +589,28 @@ def register_device(
         model=model,
         assigned_to_name=assigned_to_name,
         assigned_to_email=assigned_to_email,
+        department=department,
+        assigned_to_id=assigned_to_id,
         asset_tag=asset_tag,
         registered_by=registered_by,
-        registered_at=now or dt.datetime.now(dt.UTC),
+        registered_at=assigned_time,
     )
     session.add(device)
     session.flush()
+
+    if assigned_to_name:
+        assignment = DeviceAssignment(
+            device_id=device.id,
+            employee_id=assigned_to_id,
+            assigned_to_name=assigned_to_name,
+            assigned_to_email=assigned_to_email,
+            department=department,
+            assigned_at=assigned_time,
+            assigned_by=registered_by,
+        )
+        session.add(assignment)
+        session.flush()
+
     return device
 
 
@@ -906,3 +927,271 @@ def create_incident(
     session.add(row)
     session.flush()
     return row
+
+
+# --------------------------------------------------------------------------- #
+# Employees & Device Assignments
+# --------------------------------------------------------------------------- #
+
+
+def create_employee(
+    session: Session,
+    *,
+    full_name: str,
+    email: str,
+    department: str | None = None,
+    job_title: str | None = None,
+    phone: str | None = None,
+    status: str = "active",
+) -> Employee:
+    now = dt.datetime.now(dt.UTC)
+    employee = Employee(
+        full_name=full_name,
+        email=email.strip().lower(),
+        department=department,
+        job_title=job_title,
+        phone=phone,
+        status=status,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(employee)
+    session.flush()
+    return employee
+
+
+def get_employee(session: Session, employee_id: uuid.UUID) -> Employee | None:
+    return session.get(Employee, employee_id)
+
+
+def get_employee_by_email(session: Session, email: str) -> Employee | None:
+    return session.scalar(select(Employee).where(Employee.email == email.strip().lower()))
+
+
+def list_employees(
+    session: Session,
+    *,
+    search: str | None = None,
+    department: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+) -> Sequence[tuple[Employee, int]]:
+    stmt = (
+        select(
+            Employee,
+            func.count(Device.id).label("assigned_device_count"),
+        )
+        .outerjoin(Device, Device.assigned_to_id == Employee.id)
+        .group_by(Employee.id)
+        .order_by(Employee.full_name)
+    )
+    if search:
+        pattern = f"%{search.strip().lower()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(Employee.full_name).like(pattern),
+                func.lower(Employee.email).like(pattern),
+                func.lower(Employee.department).like(pattern),
+            )
+        )
+    if department:
+        stmt = stmt.where(Employee.department == department)
+    if status:
+        stmt = stmt.where(Employee.status == status)
+
+    return list(session.execute(stmt.limit(limit)).all())
+
+
+def update_employee(
+    session: Session,
+    *,
+    employee: Employee,
+    full_name: str | None = None,
+    email: str | None = None,
+    department: str | None = None,
+    job_title: str | None = None,
+    phone: str | None = None,
+    status: str | None = None,
+) -> Employee:
+    if full_name is not None:
+        employee.full_name = full_name
+    if email is not None:
+        employee.email = email.strip().lower()
+    if department is not None:
+        employee.department = department
+    if job_title is not None:
+        employee.job_title = job_title
+    if phone is not None:
+        employee.phone = phone
+    if status is not None:
+        employee.status = status
+    employee.updated_at = dt.datetime.now(dt.UTC)
+    session.flush()
+    return employee
+
+
+def delete_employee(session: Session, employee: Employee) -> None:
+    session.delete(employee)
+    session.flush()
+
+
+def assign_device(
+    session: Session,
+    *,
+    device: Device,
+    assigned_to_name: str,
+    assigned_to_email: str | None = None,
+    department: str | None = None,
+    employee_id: uuid.UUID | None = None,
+    assigned_by: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> DeviceAssignment:
+    now = dt.datetime.now(dt.UTC)
+
+    # 1. Close any currently active assignment for this device
+    active_assignments = session.scalars(
+        select(DeviceAssignment).where(
+            DeviceAssignment.device_id == device.id,
+            DeviceAssignment.unassigned_at.is_(None),
+        )
+    ).all()
+    for active in active_assignments:
+        active.unassigned_at = now
+        active.unassigned_by = assigned_by
+
+    # 2. Update device record
+    device.assigned_to_name = assigned_to_name
+    device.assigned_to_email = assigned_to_email.strip().lower() if assigned_to_email else None
+    device.department = department
+    device.assigned_to_id = employee_id
+
+    # 3. Create new assignment row
+    assignment = DeviceAssignment(
+        device_id=device.id,
+        employee_id=employee_id,
+        assigned_to_name=assigned_to_name,
+        assigned_to_email=assigned_to_email.strip().lower() if assigned_to_email else None,
+        department=department,
+        notes=notes,
+        assigned_at=now,
+        assigned_by=assigned_by,
+    )
+    session.add(assignment)
+    session.flush()
+    return assignment
+
+
+def unassign_device(
+    session: Session,
+    *,
+    device: Device,
+    unassigned_by: uuid.UUID | None = None,
+) -> None:
+    now = dt.datetime.now(dt.UTC)
+
+    # 1. Close any active assignment
+    active_assignments = session.scalars(
+        select(DeviceAssignment).where(
+            DeviceAssignment.device_id == device.id,
+            DeviceAssignment.unassigned_at.is_(None),
+        )
+    ).all()
+    for active in active_assignments:
+        active.unassigned_at = now
+        active.unassigned_by = unassigned_by
+
+    # 2. Clear assignment fields on device
+    device.assigned_to_name = None
+    device.assigned_to_email = None
+    device.department = None
+    device.assigned_to_id = None
+    session.flush()
+
+
+def list_device_assignments(
+    session: Session,
+    device_id: uuid.UUID,
+) -> Sequence[DeviceAssignment]:
+    return list(
+        session.scalars(
+            select(DeviceAssignment)
+            .where(DeviceAssignment.device_id == device_id)
+            .order_by(DeviceAssignment.assigned_at.desc())
+        )
+    )
+
+
+def check_offline_devices(
+    session: Session,
+    *,
+    threshold_seconds: int = 900,
+) -> tuple[int, int, int, list[uuid.UUID]]:
+    """Scan active enrolled devices and raise incidents for ones missing heartbeats."""
+    now = dt.datetime.now(dt.UTC)
+    cutoff = now - dt.timedelta(seconds=threshold_seconds)
+
+    # Find active enrolled devices
+    devices = list(
+        session.scalars(
+            select(Device).where(
+                Device.status == "active",
+                Device.enrolled_at.is_not(None),
+            )
+        )
+    )
+
+    checked = len(devices)
+    flagged: list[uuid.UUID] = []
+    new_incidents = 0
+
+    for dev in devices:
+        last_seen = dev.last_heartbeat_at or dev.enrolled_at
+        if last_seen is not None:
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=dt.UTC)
+            if last_seen < cutoff:
+                flagged.append(dev.id)
+
+                # Check if there's already an open incident for this device
+                existing = session.scalar(
+                    select(Incident).where(
+                        Incident.device_id == dev.id,
+                        Incident.kind == "device_offline",
+                        Incident.status.in_(["open", "acknowledged", "investigating"]),
+                    )
+                )
+                if not existing:
+                    diff_minutes = max(1, int((now - last_seen).total_seconds() / 60))
+                    dev_name = dev.display_name or dev.hostname or str(dev.id)[:8]
+                    create_incident(
+                        session,
+                        kind="device_offline",
+                        device_id=dev.id,
+                        severity="medium",
+                        summary=f"Device '{dev_name}' has not checked in for {diff_minutes} minutes.",
+                        note=f"Last seen at {last_seen.isoformat()}. Threshold was {threshold_seconds}s.",
+                    )
+                    new_incidents += 1
+
+    return checked, len(flagged), new_incidents, flagged
+
+
+def resolve_offline_incidents_for_device(
+    session: Session,
+    device_id: uuid.UUID,
+) -> None:
+    now = dt.datetime.now(dt.UTC)
+    open_incidents = session.scalars(
+        select(Incident).where(
+            Incident.device_id == device_id,
+            Incident.kind == "device_offline",
+            Incident.status.in_(["open", "acknowledged", "investigating"]),
+        )
+    ).all()
+    for inc in open_incidents:
+        inc.status = "resolved"
+        inc.closed_at = now
+        inc.updated_at = now
+        inc.note = (inc.note or "") + f"\n[Auto-resolved] Device reconnected at {now.isoformat()}."
+    if open_incidents:
+        session.flush()

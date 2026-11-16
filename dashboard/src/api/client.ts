@@ -1,13 +1,18 @@
 import type {
   AdminRole,
+  AssignDeviceRequest,
   AuditEntryResponse,
   AuthModeResponse,
   ChainVerificationResponse,
+  CheckOfflineDevicesResponse,
+  CreateEmployeeRequest,
   CreateEnrollmentTokenResponse,
+  DeviceAssignment,
   DeviceCounts,
   DeviceDetail,
   DeviceListQuery,
   DeviceSummary,
+  Employee,
   EnrollmentTokenResponse,
   InstallerInfoResponse,
   MeResponse,
@@ -15,6 +20,7 @@ import type {
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   TokenResponse,
+  UpdateEmployeeRequest,
   UserResponse,
 } from "./types";
 
@@ -42,19 +48,24 @@ import type {
 
 export type {
   AdminRole,
+  AssignDeviceRequest,
   AuditEntryResponse,
   AuthModeResponse,
   ChainVerificationResponse,
   ChangePasswordRequest,
   ChangeRoleRequest,
+  CheckOfflineDevicesResponse,
+  CreateEmployeeRequest,
   CreateEnrollmentTokenResponse,
   CreateUserRequest,
   ResetPasswordRequest,
+  DeviceAssignment,
   DeviceCounts,
   DeviceDetail,
   DeviceListQuery,
   DevicePlatform,
   DeviceSummary,
+  Employee,
   EnrollmentTokenResponse,
   FieldError,
   InstallerInfoResponse,
@@ -63,6 +74,7 @@ export type {
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   TokenResponse,
+  UpdateEmployeeRequest,
   UserResponse,
 } from "./types";
 
@@ -383,4 +395,50 @@ export const api = {
   verifyAuditChain: () =>
     request<ChainVerificationResponse>("/api/v1/audit-logs:verify"),
 
+  // --- Employees ---
+  listEmployees: (params?: { q?: string; department?: string; status?: string }) =>
+    request<Employee[]>("/api/v1/employees", {
+      query: {
+        q: params?.q || undefined,
+        department: params?.department || undefined,
+        status: params?.status || undefined,
+      },
+    }),
+
+  getEmployee: (employeeId: string) =>
+    request<Employee>(`/api/v1/employees/${encodeURIComponent(employeeId)}`),
+
+  createEmployee: (body: CreateEmployeeRequest) =>
+    request<Employee>("/api/v1/employees", { method: "POST", body }),
+
+  updateEmployee: (employeeId: string, body: UpdateEmployeeRequest) =>
+    request<Employee>(`/api/v1/employees/${encodeURIComponent(employeeId)}`, {
+      method: "PATCH",
+      body,
+    }),
+
+  deleteEmployee: (employeeId: string) =>
+    request<void>(`/api/v1/employees/${encodeURIComponent(employeeId)}`, { method: "DELETE" }),
+
+  // --- Device Assignments & History ---
+  assignDevice: (deviceId: string, body: AssignDeviceRequest) =>
+    request<DeviceAssignment>(`/api/v1/devices/${encodeURIComponent(deviceId)}:assign`, {
+      method: "POST",
+      body,
+    }),
+
+  unassignDevice: (deviceId: string) =>
+    request<void>(`/api/v1/devices/${encodeURIComponent(deviceId)}:unassign`, {
+      method: "POST",
+    }),
+
+  getDeviceAssignments: (deviceId: string) =>
+    request<DeviceAssignment[]>(`/api/v1/devices/${encodeURIComponent(deviceId)}/assignments`),
+
+  // --- Monitoring & Health: Offline Alerts ---
+  checkOfflineDevices: (thresholdSeconds = 900) =>
+    request<CheckOfflineDevicesResponse>("/api/v1/devices:check-offline", {
+      method: "POST",
+      body: { threshold_seconds: thresholdSeconds },
+    }),
 };

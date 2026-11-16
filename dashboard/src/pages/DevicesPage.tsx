@@ -55,6 +55,8 @@ export default function DevicesPage() {
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [checkingOffline, setCheckingOffline] = useState(false);
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -90,6 +92,22 @@ export default function DevicesPage() {
     return () => clearTimeout(handle);
   }, [load]);
 
+  async function handleCheckOffline() {
+    setCheckingOffline(true);
+    setError(null);
+    try {
+      const res = await api.checkOfflineDevices();
+      setOfflineNotice(
+        `Offline check completed: ${res.checked_count} active devices checked, ${res.flagged_offline_count} offline, ${res.new_incidents_created} new alert(s) raised.`
+      );
+      await load();
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setCheckingOffline(false);
+    }
+  }
+
   const osVersions = useMemo(
     () => [...new Set(devices.map((device) => device.os_version_id).filter(Boolean))].sort(),
     [devices],
@@ -108,12 +126,29 @@ export default function DevicesPage() {
             last contact is always shown beside it.
           </p>
         </div>
-        {canAdd && (
-          <button type="button" onClick={() => setAdding(true)}>
-            + Add device
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            type="button"
+            className="button subtle"
+            onClick={handleCheckOffline}
+            disabled={checkingOffline}
+          >
+            {checkingOffline ? "Checking…" : "Run Offline Check"}
           </button>
-        )}
+          {canAdd && (
+            <button type="button" onClick={() => setAdding(true)}>
+              + Add device
+            </button>
+          )}
+        </div>
       </div>
+
+      <ErrorBanner error={error} />
+      {offlineNotice && (
+        <div className="banner ok" role="status" style={{ marginBottom: "1rem" }}>
+          <p>{offlineNotice}</p>
+        </div>
+      )}
 
       <div className="stats">
         <div className="stat">
