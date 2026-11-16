@@ -32,3 +32,4 @@ def downgrade() -> None:
     op.drop_column("devices", "total_ram_bytes")
     op.drop_column("devices", "cpu_cores")
     op.drop_column("devices", "cpu_model")
+
