@@ -1,0 +1,89 @@
+[Unit]
+# Root USB policy daemon.
+#
+# The privileged half of the split: it owns /etc/usbguard, restarts the
+# usbguard daemon, and accepts a fixed set of four typed operations from the
+# unprivileged management agent over a Unix socket. It is the only component
+# that needs root.
+#
+# This genuinely is a daemon rather than a oneshot: it exists to answer
+# requests, so there is nothing to converge and exit from. The cost is that
+# root is held continuously, which is why the hardening below matters.
+Description=UbuntuGuard USB enforcer (root)
+Documentation=https://ubuntuguard.invalid/docs/agent
+
+# Ordering only, not a dependency. This daemon reports `unsupported` rather
+# than failing when usbguard is absent, and usbguard enforces from its
+# on-disk rules regardless of whether this is running.
+After=usbguard.service
+Wants=usbguard.service
+
+[Service]
+Type=simple
+# Same interpreter and layout as ubuntuguard-agent.service: the installer
+# builds one venv at /opt/ubuntuguard/venv and both units run from it.
+#
+# Deliberately no User=/Group= here, unlike the agent unit. This is the half
+# that needs root -- it writes /etc/usbguard and restarts the usbguard daemon.
+# The agent stays unprivileged and reaches it over the socket below.
+ExecStart=/opt/ubuntuguard/venv/bin/python -m ubuntuguard_agent.enforcer.service \
+    --socket /run/ubuntuguard/enforcer.sock \
+    --group ubuntuguard \
+    --peer-user ubuntuguard
+
+Restart=on-failure
+RestartSec=5
+
+# The socket is created at startup and removed on shutdown. SIGTERM is
+# handled: the accept loop is woken through a pipe rather than left blocked,
+# so a stop completes immediately instead of waiting out the timeout.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# --- hardening -------------------------------------------------------------
+# This daemon writes /etc/usbguard and calls systemctl, so it cannot be fully
+# sandboxed. ProtectSystem=strict makes the filesystem read-only and then
+# re-opens only what it genuinely writes.
+ProtectSystem=strict
+ReadWritePaths=/etc/usbguard /var/lib/ubuntuguard /run/ubuntuguard
+
+# RuntimeDirectory creates /run/ubuntuguard with the right owner before
+# ExecStart, and systemd removes it on stop, so a stale socket cannot outlive
+# the service. The daemon also clears a leftover socket itself, because a
+# machine that lost power does not get the clean shutdown path.
+RuntimeDirectory=ubuntuguard
+RuntimeDirectoryMode=0750
+
+# Snapshots for rollback. Root-only: they contain the policy, which names the
+# authorised devices.
+StateDirectory=ubuntuguard
+StateDirectoryMode=0700
+
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+ProtectClock=yes
+
+# AF_UNIX for the agent socket; AF_NETLINK because usbguard's device
+# enumeration uses it. No AF_INET: it never talks to the network, and
+# saying so here means a bug in it cannot become an outbound connection.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# Deliberately NOT set:
+#   PrivateNetwork=yes -- would be accurate, but systemctl needs to reach
+#       the system bus; revisit if that is confirmed unaffected.
+#   PrivateDevices=yes -- it must see USB devices.
+#   User= / DynamicUser= -- writing /etc/usbguard and calling systemctl
+#       require root. That is the whole reason this component is separate
+#       from agentd, which does run unprivileged.
+
+[Install]
+WantedBy=multi-user.target

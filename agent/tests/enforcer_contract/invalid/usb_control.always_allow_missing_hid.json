@@ -1,0 +1,13 @@
+{
+  "schema": "ubuntuguard.usb_control.v1",
+  "mode": "block_all_storage",
+  "protected_classes": ["mass_storage"],
+  "always_allow_classes": ["hub", "network"],
+  "allowlist": [],
+  "exceptions": [],
+  "reporting": {
+    "report_allowed": true,
+    "report_blocked": true,
+    "report_present_at_start": true
+  }
+}

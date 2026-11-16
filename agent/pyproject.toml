@@ -57,6 +57,11 @@ dependencies = [
 
 [project.scripts]
 ubuntuguard-agent = "ubuntuguard_agent.cli:main"
+# The root USB enforcer (Phase 7). Separate entry point because it runs as a
+# different user to the agent -- root rather than `ubuntuguard` -- under its
+# own unit, packaging/systemd/ubuntuguard-enforcerd.service. It refuses to
+# start as anyone but root.
+ubuntuguard-enforcerd = "ubuntuguard_agent.enforcer.service:main"
 
 [project.optional-dependencies]
 dev = [

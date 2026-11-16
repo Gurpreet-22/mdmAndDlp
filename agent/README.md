@@ -101,10 +101,28 @@ the ones that catch a byte-level disagreement with the server — run with no
 laptop, no server and no database. The directory is `osadapter/` rather than
 `platform/` to avoid shadowing a standard-library module name.
 
-Two directories named in the design are deliberately absent until they have
-something in them: `queue/` (the durable SQLite event queue, Phase 7) and
-`enforcer/` (the root component, Phase 7). The enforcer socket path is already
-declared in `AgentPaths` so the privilege boundary has an address.
+One directory named in the design is still deliberately absent until it has
+something in it: `queue/`, the durable SQLite event queue.
+
+`enforcer/` now exists. It is the root component: it takes a validated
+`usb_control` payload and derives the USBGuard rules itself, then reads the
+state back from the OS to confirm they took effect. It is reached over the
+socket whose path `AgentPaths` already declared, with an `SO_PEERCRED` check
+that the caller is the agent user. Its operation set is the fixed four from
+`docs/02-policy-and-signing.md` §7 and nothing else.
+
+Two things about it are worth knowing before reading it:
+
+It is the only part of this package that runs an external program. Everything
+else reads `/proc` and `/etc` directly, which is better, and is not an option
+here — usbguard is driven through its own command-line tool, and the
+alternative is reimplementing its D-Bus protocol. The argument vectors are
+module constants; no element of any command comes from a policy payload.
+
+`enforcer/ops.py` is transport-free: a request is a dict and a response is a
+dict, with no knowledge that a socket exists. That keeps the privileged logic
+testable without root or a running daemon, and confines the wire format to
+`service.py` and `client.py`.
 
 ## Dependencies
 

