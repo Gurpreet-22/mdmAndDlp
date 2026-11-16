@@ -206,6 +206,11 @@ export interface DeviceDetail extends DeviceSummary {
   revoked_at: string | null;
   revoke_reason: string | null;
   virtualization: string | null;
+  cpu_model: string | null;
+  cpu_cores: number | null;
+  total_ram_bytes: number | null;
+  disk_total_bytes: number | null;
+  disk_free_bytes: number | null;
 }
 
 export interface EnrollmentTokenResponse {

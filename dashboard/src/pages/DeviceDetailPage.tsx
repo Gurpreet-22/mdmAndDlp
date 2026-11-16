@@ -13,6 +13,12 @@ import { useAuth } from "../auth";
 
 const MIN_REASON_LENGTH = 8;
 
+function formatBytes(bytes: number | null | undefined): string | null {
+  if (bytes === null || bytes === undefined || bytes <= 0) return null;
+  const gb = bytes / (1024 * 1024 * 1024);
+  return `${gb.toFixed(1)} GB`;
+}
+
 function Field({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
   return (
     <div className="field">
@@ -274,6 +280,23 @@ export default function DeviceDetailPage() {
             />
             <Field label="Kernel" value={device.kernel} mono />
             <Field label="Architecture" value={device.arch} />
+            <Field
+              label="Processor (CPU)"
+              value={
+                device.cpu_model
+                  ? `${device.cpu_model}${device.cpu_cores ? ` (${device.cpu_cores} cores)` : ""}`
+                  : null
+              }
+            />
+            <Field label="Memory (RAM)" value={formatBytes(device.total_ram_bytes)} />
+            <Field
+              label="Disk capacity"
+              value={
+                device.disk_total_bytes
+                  ? `${formatBytes(device.disk_total_bytes)}${device.disk_free_bytes ? ` (${formatBytes(device.disk_free_bytes)} free)` : ""}`
+                  : null
+              }
+            />
             <Field label="Agent version" value={device.agent_version} />
             <Field
               label="Build"

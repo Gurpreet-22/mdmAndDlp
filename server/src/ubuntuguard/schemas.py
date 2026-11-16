@@ -337,6 +337,11 @@ class EnrollRequest(StrictModel):
             "only; the server never uses it to identify or authorise a device."
         ),
     )
+    cpu_model: str | None = Field(default=None, max_length=128)
+    cpu_cores: int | None = Field(default=None, ge=1)
+    total_ram_bytes: int | None = Field(default=None, ge=0)
+    disk_total_bytes: int | None = Field(default=None, ge=0)
+    disk_free_bytes: int | None = Field(default=None, ge=0)
 
 
 class PolicyPublicKey(BaseModel):
@@ -425,6 +430,11 @@ class DeviceDetail(DeviceSummary):
     revoked_at: dt.datetime | None
     revoke_reason: str | None
     virtualization: str | None
+    cpu_model: str | None = None
+    cpu_cores: int | None = None
+    total_ram_bytes: int | None = None
+    disk_total_bytes: int | None = None
+    disk_free_bytes: int | None = None
 
 
 class RegisterDeviceRequest(StrictModel):
@@ -563,6 +573,11 @@ class HeartbeatRequest(StrictModel):
         default=None,
         description="Refreshes the recorded address when the device moves network.",
     )
+    cpu_model: str | None = Field(default=None, max_length=128)
+    cpu_cores: int | None = Field(default=None, ge=1)
+    total_ram_bytes: int | None = Field(default=None, ge=0)
+    disk_total_bytes: int | None = Field(default=None, ge=0)
+    disk_free_bytes: int | None = Field(default=None, ge=0)
 
 
 class HeartbeatResponse(BaseModel):

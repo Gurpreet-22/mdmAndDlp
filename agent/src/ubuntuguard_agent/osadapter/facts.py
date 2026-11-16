@@ -66,6 +66,45 @@ def parse_uptime(text: str) -> int | None:
     return int(seconds)
 
 
+def parse_cpu_info(text: str) -> tuple[str | None, int | None]:
+    """Parse /proc/cpuinfo for model name and processor count.
+
+    Returns (model_name, core_count). Tolerant of unusual or stripped lines.
+    """
+    model: str | None = None
+    cores = 0
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key_strip = key.strip().lower()
+        val_strip = value.strip()
+        if (key_strip in ("model name", "hardware", "cpu model")) and not model and val_strip:
+            model = val_strip
+        if key_strip == "processor":
+            cores += 1
+
+    return model, (cores if cores > 0 else None)
+
+
+def parse_mem_total(text: str) -> int | None:
+    """Parse MemTotal from /proc/meminfo in bytes.
+
+    Tolerant parser: lines look like `MemTotal:       14088928 kB`.
+    Returns integer bytes or None.
+    """
+    for line in text.splitlines():
+        if line.startswith("MemTotal:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    kb = int(parts[1])
+                    return kb * 1024
+                except ValueError:
+                    return None
+    return None
+
+
 def sha256_hex(value: str) -> str:
     """Lowercase hex SHA-256 of a string, encoded UTF-8.
 

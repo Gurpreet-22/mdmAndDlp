@@ -100,6 +100,13 @@ class HostFacts:
     #: at a fleet list wants to know which office a laptop checked in from.
     primary_adapter_ip: str | None = None
 
+    #: Hardware information (CPU, RAM, disk capacity) where supported.
+    cpu_model: str | None = None
+    cpu_cores: int | None = None
+    total_ram_bytes: int | None = None
+    disk_total_bytes: int | None = None
+    disk_free_bytes: int | None = None
+
 
 @runtime_checkable
 class OsAdapter(Protocol):

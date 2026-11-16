@@ -20,6 +20,7 @@ is the real one.
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 from collections.abc import Callable
 from pathlib import Path
@@ -29,6 +30,8 @@ from ubuntuguard_agent.osadapter.facts import (
     detect_virtualization,
     hash_mac,
     is_physical_interface,
+    parse_cpu_info,
+    parse_mem_total,
     parse_os_release,
     parse_uptime,
     sha256_hex,
@@ -60,6 +63,7 @@ _DMI_PRODUCT_UUID_PATH = "sys/class/dmi/id/product_uuid"
 _DMI_SYS_VENDOR_PATH = "sys/class/dmi/id/sys_vendor"
 _DMI_PRODUCT_NAME_PATH = "sys/class/dmi/id/product_name"
 _CPUINFO_PATH = "proc/cpuinfo"
+_MEMINFO_PATH = "proc/meminfo"
 _NET_CLASS_DIR = "sys/class/net"
 
 #: Files whose presence identifies a container runtime. Checked before DMI,
@@ -281,9 +285,35 @@ class UbuntuAdapter:
         except OSError:
             return ""
 
+    def cpu_info(self) -> tuple[str | None, int | None]:
+        """(model_name, core_count) from /proc/cpuinfo."""
+        text = _read_text(self._root / _CPUINFO_PATH)
+        if text is None:
+            return None, None
+        return parse_cpu_info(text)
+
+    def total_ram_bytes(self) -> int | None:
+        """Total memory in bytes from /proc/meminfo."""
+        text = _read_text(self._root / _MEMINFO_PATH)
+        if text is None:
+            return None
+        return parse_mem_total(text)
+
+    def disk_usage(self) -> tuple[int | None, int | None]:
+        """Total and free bytes on the root filesystem (None under synthetic test roots)."""
+        if self._root != Path("/"):
+            return None, None
+        try:
+            usage = shutil.disk_usage(self._root)
+            return usage.total, usage.free
+        except OSError:
+            return None, None
+
     # --- the interface ----------------------------------------------------- #
 
     def host_facts(self) -> HostFacts:
+        cpu_model, cpu_cores = self.cpu_info()
+        disk_total, disk_free = self.disk_usage()
         return HostFacts(
             hostname=self.hostname(),
             os=self.os_release(),
@@ -296,6 +326,11 @@ class UbuntuAdapter:
             mac_hashes=self.mac_hashes(),
             virtualization=self.virtualization(),
             primary_adapter_ip=self.primary_adapter_ip(),
+            cpu_model=cpu_model,
+            cpu_cores=cpu_cores,
+            total_ram_bytes=self.total_ram_bytes(),
+            disk_total_bytes=disk_total,
+            disk_free_bytes=disk_free,
         )
 
     def is_supported(self) -> bool:

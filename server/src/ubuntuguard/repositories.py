@@ -632,6 +632,11 @@ def claim_pending_device(
     clone_suspected: bool,
     clone_of_device_id: uuid.UUID | None,
     enrolled_at: dt.datetime,
+    cpu_model: str | None = None,
+    cpu_cores: int | None = None,
+    total_ram_bytes: int | None = None,
+    disk_total_bytes: int | None = None,
+    disk_free_bytes: int | None = None,
 ) -> Device:
     """Fill in a registered device's row at enrollment.
 
@@ -656,6 +661,16 @@ def claim_pending_device(
     device.clone_suspected = clone_suspected
     device.clone_of_device_id = clone_of_device_id
     device.enrolled_at = enrolled_at
+    if cpu_model is not None:
+        device.cpu_model = cpu_model[:128]
+    if cpu_cores is not None:
+        device.cpu_cores = cpu_cores
+    if total_ram_bytes is not None:
+        device.total_ram_bytes = total_ram_bytes
+    if disk_total_bytes is not None:
+        device.disk_total_bytes = disk_total_bytes
+    if disk_free_bytes is not None:
+        device.disk_free_bytes = disk_free_bytes
     session.flush()
     return device
 
@@ -868,12 +883,27 @@ def touch_heartbeat(
     device: Device,
     agent_version: str | None,
     primary_adapter_ip: str | None = None,
+    cpu_model: str | None = None,
+    cpu_cores: int | None = None,
+    total_ram_bytes: int | None = None,
+    disk_total_bytes: int | None = None,
+    disk_free_bytes: int | None = None,
 ) -> None:
     device.last_heartbeat_at = dt.datetime.now(dt.UTC)
     if agent_version:
         device.agent_version = agent_version[:64]
     if primary_adapter_ip:
         device.primary_adapter_ip = primary_adapter_ip[:45]
+    if cpu_model is not None:
+        device.cpu_model = cpu_model[:128]
+    if cpu_cores is not None:
+        device.cpu_cores = cpu_cores
+    if total_ram_bytes is not None:
+        device.total_ram_bytes = total_ram_bytes
+    if disk_total_bytes is not None:
+        device.disk_total_bytes = disk_total_bytes
+    if disk_free_bytes is not None:
+        device.disk_free_bytes = disk_free_bytes
     session.flush()
 
 

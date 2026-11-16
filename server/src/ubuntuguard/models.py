@@ -310,6 +310,13 @@ class Device(Base):
     dmi_product_uuid_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     virtualization: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Hardware information (CPU, RAM, disk capacity)
+    cpu_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cpu_cores: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_ram_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
     # A fingerprint collision does not block enrollment. The new device is
     # created as distinct and flagged, because a reimaged laptop and a cloned
     # VM look identical here and only a human can tell them apart.

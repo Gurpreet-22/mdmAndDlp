@@ -174,6 +174,11 @@ def enroll(
             clone_suspected=clone_suspected,
             clone_of_device_id=clones[0].id if clones else None,
             enrolled_at=now,
+            cpu_model=request.cpu_model,
+            cpu_cores=request.cpu_cores,
+            total_ram_bytes=request.total_ram_bytes,
+            disk_total_bytes=request.disk_total_bytes,
+            disk_free_bytes=request.disk_free_bytes,
         )
     else:
         # No pre-registration, or the row is already enrolled or revoked. Either
@@ -196,6 +201,11 @@ def enroll(
             clone_suspected=clone_suspected,
             clone_of_device_id=clones[0].id if clones else None,
             enrolled_at=now,
+            cpu_model=request.cpu_model,
+            cpu_cores=request.cpu_cores,
+            total_ram_bytes=request.total_ram_bytes,
+            disk_total_bytes=request.disk_total_bytes,
+            disk_free_bytes=request.disk_free_bytes,
         )
 
     certificate = issue_device_certificate(keys.ca, csr, str(device.id), now=now)

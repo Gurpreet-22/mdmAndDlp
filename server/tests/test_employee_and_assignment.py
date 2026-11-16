@@ -199,3 +199,61 @@ def test_offline_devices_check_and_resolve(session: Session) -> None:
     session.refresh(incident)
     assert incident.status == "resolved"
     assert "[Auto-resolved]" in incident.note
+
+
+def test_device_hardware_info(session: Session) -> None:
+    now = dt.datetime.now(dt.UTC)
+    dev = repositories.register_device(
+        session,
+        display_name="Workstation 1",
+        platform="linux",
+        registered_by=None,
+    )
+    session.commit()
+
+    # Claim at enrollment with hardware specs
+    repositories.claim_pending_device(
+        session,
+        device=dev,
+        hostname="workstation-1",
+        agent_version="0.1.0",
+        release_build=True,
+        os_id="ubuntu",
+        os_version_id="24.04",
+        kernel="6.8.0-generic",
+        arch="x86_64",
+        machine_id_hash="abc",
+        dmi_product_uuid_hash=None,
+        virtualization=None,
+        primary_adapter_ip="192.168.1.50",
+        clone_suspected=False,
+        clone_of_device_id=None,
+        enrolled_at=now,
+        cpu_model="11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz",
+        cpu_cores=8,
+        total_ram_bytes=17179869184,  # 16 GB
+        disk_total_bytes=512110190592,  # ~512 GB
+        disk_free_bytes=256055095296,
+    )
+    session.commit()
+
+    device = repositories.get_device(session, dev.id)
+    assert device is not None
+    assert device.cpu_model == "11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz"
+    assert device.cpu_cores == 8
+    assert device.total_ram_bytes == 17179869184
+    assert device.disk_total_bytes == 512110190592
+    assert device.disk_free_bytes == 256055095296
+
+    # Refresh via heartbeat
+    repositories.touch_heartbeat(
+        session,
+        device=device,
+        agent_version="0.1.1",
+        disk_free_bytes=250000000000,
+    )
+    session.commit()
+    assert device.disk_free_bytes == 250000000000
+    assert device.cpu_cores == 8
+
+

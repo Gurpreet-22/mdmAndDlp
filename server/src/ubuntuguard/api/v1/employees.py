@@ -179,3 +179,4 @@ def delete_employee(
     )
     repositories.delete_employee(session, emp)
     session.commit()
+

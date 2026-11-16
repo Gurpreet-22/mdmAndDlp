@@ -93,6 +93,11 @@ def _detail(device: Device, now: dt.datetime) -> DeviceDetail:
         revoked_at=device.revoked_at,
         revoke_reason=device.revoke_reason,
         virtualization=device.virtualization,
+        cpu_model=device.cpu_model,
+        cpu_cores=device.cpu_cores,
+        total_ram_bytes=device.total_ram_bytes,
+        disk_total_bytes=device.disk_total_bytes,
+        disk_free_bytes=device.disk_free_bytes,
     )
 
 
@@ -497,6 +502,11 @@ def heartbeat(
         device=row,
         agent_version=body.agent_version,
         primary_adapter_ip=body.primary_adapter_ip,
+        cpu_model=body.cpu_model,
+        cpu_cores=body.cpu_cores,
+        total_ram_bytes=body.total_ram_bytes,
+        disk_total_bytes=body.disk_total_bytes,
+        disk_free_bytes=body.disk_free_bytes,
     )
     repositories.resolve_offline_incidents_for_device(session, row.id)
 

@@ -324,3 +324,48 @@ def test_the_real_host_can_be_read_without_raising() -> None:
     facts = detect_adapter().host_facts()
     assert isinstance(facts.kernel, str) and facts.kernel
     assert isinstance(facts.arch, str) and facts.arch
+
+
+def test_parse_cpu_info_intel_amd() -> None:
+    from ubuntuguard_agent.osadapter.facts import parse_cpu_info
+
+    sample = (
+        "processor\t: 0\n"
+        "vendor_id\t: GenuineIntel\n"
+        "model name\t: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz\n"
+        "cpu MHz\t\t: 2400.000\n\n"
+        "processor\t: 1\n"
+        "vendor_id\t: GenuineIntel\n"
+        "model name\t: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz\n"
+    )
+    model, cores = parse_cpu_info(sample)
+    assert model == "11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz"
+    assert cores == 2
+
+
+def test_parse_cpu_info_empty() -> None:
+    from ubuntuguard_agent.osadapter.facts import parse_cpu_info
+
+    model, cores = parse_cpu_info("")
+    assert model is None
+    assert cores is None
+
+
+def test_parse_mem_total() -> None:
+    from ubuntuguard_agent.osadapter.facts import parse_mem_total
+
+    sample = (
+        "MemTotal:       16384000 kB\n"
+        "MemFree:         8192000 kB\n"
+        "MemAvailable:   12000000 kB\n"
+    )
+    bytes_total = parse_mem_total(sample)
+    assert bytes_total == 16384000 * 1024
+
+
+def test_parse_mem_total_missing() -> None:
+    from ubuntuguard_agent.osadapter.facts import parse_mem_total
+
+    assert parse_mem_total("") is None
+    assert parse_mem_total("SomethingElse: 1234 kB\n") is None
+

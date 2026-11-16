@@ -143,6 +143,16 @@ def build_heartbeat_payload(
     }
     if facts.primary_adapter_ip:
         payload["primary_adapter_ip"] = facts.primary_adapter_ip
+    if facts.cpu_model:
+        payload["cpu_model"] = facts.cpu_model
+    if facts.cpu_cores:
+        payload["cpu_cores"] = facts.cpu_cores
+    if facts.total_ram_bytes:
+        payload["total_ram_bytes"] = facts.total_ram_bytes
+    if facts.disk_total_bytes:
+        payload["disk_total_bytes"] = facts.disk_total_bytes
+    if facts.disk_free_bytes:
+        payload["disk_free_bytes"] = facts.disk_free_bytes
     return payload
 
 
