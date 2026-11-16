@@ -286,3 +286,203 @@ public_key = csr.public_key()
 
 `tests/test_ca.py` already covers the refusal at the unit level, which is why
 the gap survived: no test drives a weak key through the HTTP layer.
+
+---
+
+## 9. The installer verifies integrity but is not signed
+
+**Severity:** a gap in supply-chain assurance, bounded by HTTPS.
+**Status:** OPEN by design, for production.
+
+The employee installer (`packaging/build_installer.py`,
+`packaging/installer-template.sh`) ships two layers of SHA-256 integrity
+checking:
+
+- The script verifies the agent embedded in it against a digest baked into its
+  own header, **before** unpacking anything and certainly before executing
+  anything from it. A single altered base64 character is detected;
+  `tests/test_installer_build.py::test_a_single_altered_payload_byte_is_detected`
+  runs the real script against a tampered copy and requires it to refuse.
+- The whole-file digest is published by `GET /api/v1/installer`, recomputed
+  server-side from the bytes being served rather than read from the manifest,
+  and the enrollment page shows the `sha256sum` command to compare it.
+
+**What that is not.** Neither layer is a package signature. The first is
+self-referential: an attacker who can rewrite the payload can rewrite the
+header digest beside it. The second is only as trustworthy as the HTTPS channel
+that served the page, because the digest and the file come from the same origin.
+Together they catch corruption, truncation and a tampered payload; they do not
+catch a compromised server or a compromised build host.
+
+**Why it was not closed.** A detached signature needs a release signing key.
+This project has exactly one asymmetric key for authenticity — the Ed25519
+policy signing key — and reusing it here would be wrong: it would put a key
+whose only job is to authorise device policy into a second trust domain, so a
+compromise of either would be a compromise of both, and key rotation for one
+would force it for the other. Minting a release key is a key-management decision
+with custody, rotation and revocation consequences, and inventing one
+unilaterally would be worse than recording the gap.
+
+**Recommended for production.** A separate Ed25519 release key, held off the
+build host; the builder emits a detached signature; the installer template
+verifies it against a public key compiled into it at build time; and the public
+key is distributed by a channel other than the download. A signed apt repository
+would subsume this entirely and is the better end state, alongside the `.deb` in
+feature D11.
+
+---
+
+## 10. Enrolling as root left key material the service could not read
+
+**Severity:** availability, and it defeated the whole identity.
+**Status:** FIXED.
+
+Found while reading `identity.py` during the employee-installer work.
+
+`identity.py` never changes ownership. `ensure_runtime_paths` does `mkdir` plus
+`chmod`, and `write_private_key` creates the key at mode 0600 owned by whoever
+is running. But `install.sh` creates `/var/lib/ubuntuguard/pki` owned by
+`ubuntuguard:ubuntuguard`, and the unit runs `User=ubuntuguard`.
+
+So the flow this README documented —
+`sudo /opt/ubuntuguard/venv/bin/ubuntuguard-agent enroll --token-file …` —
+wrote `device.key` as `root:root 0600` into a directory the service account
+owns. The agent then cannot read the one file its entire identity rests on, and
+every device-plane request fails in the TLS layer with something that looks like
+a proxy problem.
+
+It was survivable only because systemd's `StateDirectory=` handling chowns the
+directory tree recursively when ownership differs. That is version-dependent
+behaviour and not something to rest a device identity on.
+
+**Fixed** by enrolling as the service account rather than as root. The employee
+installer pipes the token to `runuser -u ubuntuguard -- … enroll --token-stdin`,
+and `agent/README.md` now documents `sudo -u ubuntuguard` for the manual path.
+`tests/test_installer_script.py::test_enrollment_drops_to_the_agent_service_account`
+is the regression guard.
+
+This is also least privilege, which is the reason to prefer it independently of
+the bug: enrollment writes one directory and makes one HTTPS request, and has
+never needed root.
+
+**Not changed:** `identity.py` itself. Adding a `chown` there would mean the
+agent carrying code to drop privileges it should not have held, and would only
+paper over a caller running as the wrong user. The fix belongs at the call site.
+
+---
+
+## 11. An HTTP password-reset route now exists, reversing a documented decision
+
+**Severity:** a deliberate widening, bounded and audited. **Status:** ACCEPTED.
+
+`cli.py:cmd_set_password` previously stated that a password-reset endpoint was
+"an account-takeover primitive" and was "deliberately not an HTTP route".
+`POST /api/v1/users/{id}:reset-password` now exists. The decision was
+reconsidered rather than disproved, so the original reasoning is kept in that
+docstring alongside what changed.
+
+**Why it does not widen much.** `manage_users` is held by `super_admin` alone,
+and a `super_admin` can already create accounts and disable anybody. It is
+already total authority over the admin plane; if one is compromised, the
+outcome was decided before this route existed.
+
+**What it genuinely widens.** One `super_admin` can now take over another
+`super_admin`'s identity without shell access on the server. Previously that
+needed the database password and a login to the host. That is a real reduction
+in the effort required for a lateral move between the two highest-privilege
+accounts in the system, and it is the whole of the cost.
+
+**What bounds it.** Three controls, all applied by the route:
+
+- An audit row, `user_password_reset`, naming the actor, the target and the
+  fact that a forced change was imposed. The audit log is hash-chained and
+  append-only at the database GRANT level, so the record cannot be removed by
+  the account that made it.
+- `must_change_password` is set, so the temporary credential buys exactly one
+  thing: its own replacement. Every capability-guarded route refuses until the
+  target chooses a new password, and the `password_changed` audit row records
+  `completed_forced_change: true` when they do — which is what closes the loop
+  and distinguishes a reset that was collected from one that was not.
+- Every session the target holds is revoked. They are signed out everywhere
+  immediately rather than continuing for up to fifteen minutes on an existing
+  access token, so an illegitimate reset is visible to its subject at once.
+
+**What is NOT claimed.** Nothing here stops a malicious `super_admin`. It makes
+the action loud. For a prototype whose RBAC matrix gives `manage_users` to one
+role that is the available trade; a deployment wanting more would need
+two-person control on the route, which is not implemented and would need a
+design of its own.
+
+**Not changed:** the first `super_admin` is still CLI-only. An unauthenticated
+route that creates a privileged account is a backdoor however carefully it is
+guarded, and `tests/test_route_capability_coverage.py` asserts that every
+admin-plane route either enforces a capability or appears on an explicit
+allowlist of unauthenticated ones.
+
+---
+
+## 12. Two super_admins could disable each other, permanently
+
+**Severity:** high, availability. Unrecoverable without database access.
+**Status:** FIXED.
+
+Found while auditing user management for the dashboard work.
+
+`POST /users/{id}:disable` guarded only self-disable (`cannot_disable_self`).
+With two `super_admin` accounts A and B, A could disable B and B could disable
+A, leaving zero active `super_admin`s.
+
+That state was **permanent**. `manage_users` is held by `super_admin` alone, so
+nobody remaining could re-enable anybody — and there was no enable route to
+call in any case, which `repositories.revoke_all_sessions` and
+`cli.py:cmd_revoke_sessions` both noted in passing: *"`POST /users/{id}:disable`
+is one-way through the API."* The CLI had no enable command either. Recovery
+meant `UPDATE users SET is_active = true` by hand.
+
+**Fixed** in three parts:
+
+- `POST /users/{id}:enable` exists, so the state is recoverable at all. It
+  also clears `locked_until`, because an account that was locked by failed
+  logins and then disabled would otherwise come back still refusing the correct
+  password with no route able to clear it.
+- `services/users` refuses to disable or demote the last active `super_admin`.
+- The count is taken under a row lock, because a plain count is not enough —
+  see finding 13.
+
+`tests/test_last_super_admin.py` covers all of it at the service layer, in a
+throwaway PostgreSQL schema. Those assertions are **not** covered at the HTTP
+layer: producing "the last active super_admin" over HTTP would mean disabling
+the 1,282 active `super_admin` accounts in the development database, which is
+real data belonging to somebody.
+
+---
+
+## 13. The last-super_admin guard deadlocked under concurrency
+
+**Severity:** a 500 where a 409 belonged. No data loss. **Status:** FIXED.
+
+Found by the concurrency test written for finding 12, on its first run.
+
+The first implementation locked only the *other* active `super_admin`s —
+`WHERE id != :target FOR UPDATE` — which reads as the tidier query and is
+wrong. With accounts A and B and two concurrent disables: T1 locks B, T2 locks
+A, then T1 tries to UPDATE A and T2 tries to UPDATE B. Each holds what the
+other needs.
+
+PostgreSQL detected the cycle and aborted one transaction, so **the protection
+held and no lockout occurred** — the data was never at risk. But the caller got
+an unhandled `OperationalError` and the client a `500 internal_error`, where it
+should have received a clean `409 cannot_disable_last_super_admin`.
+
+**Fixed** by locking every active `super_admin` — including the target — with
+`ORDER BY id`, and doing the exclusion in Python on the locked set. All
+concurrent callers then request the same rows in the same sequence, so the
+second waits for the first to commit, re-reads, and refuses cleanly. The target
+is in that set whenever the guard applies, so the row about to be written is
+locked up front rather than acquired later, which is the other half of why the
+cycle is gone.
+
+The three concurrency tests were run twenty times — sixty executions — with no
+failures. The failure path is asserted explicitly: a reintroduced
+`OperationalError` is reported as a lock-ordering regression rather than
+surfacing as an unrelated database error.

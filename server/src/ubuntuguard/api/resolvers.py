@@ -45,7 +45,15 @@ class DbTokenResolver:
                 # bad migration. Refusing is safer than guessing.
                 return None
 
-            return Principal(user_id=str(user.id), email=user.email, role=role)
+            return Principal(
+                user_id=str(user.id),
+                email=user.email,
+                role=role,
+                # Re-read here on every request, like `is_active` above, so an
+                # administrator's reset takes effect on the user's very next
+                # call rather than when their access token happens to expire.
+                must_change_password=user.must_change_password,
+            )
 
 
 class DbDeviceResolver:

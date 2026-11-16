@@ -372,6 +372,58 @@ def test_enrollment_is_rate_limited(config: Block) -> None:
     assert any("zone=ug_enroll" in argument for argument in limits[0])
 
 
+def test_the_installer_download_is_rate_limited(config: Block) -> None:
+    """The third unauthenticated endpoint, and the only one that returns a file.
+
+    The concern is bandwidth rather than computation: each request hashes and
+    returns ~160 KB and needs no credential, so an unlimited route is a cheap
+    way to make this server serve traffic for somebody else.
+    """
+    zones = {
+        argument.split("=", 1)[1].split(":", 1)[0]
+        for arguments in config.values("limit_req_zone")
+        for argument in arguments
+        if argument.startswith("zone=")
+    }
+    assert any("installer" in zone for zone in zones), (
+        f"no rate-limit zone for the installer download; found {sorted(zones)}"
+    )
+
+    enrollment = _server_on(config, 8443)
+    installer = next(
+        (
+            block
+            for block in enrollment.walk()
+            if block.kind == "location" and "installer" in block.argument
+        ),
+        None,
+    )
+    assert installer is not None, "no location for the installer routes"
+    limits = installer.values("limit_req")
+    assert limits, "the installer location has no limit_req"
+    assert any("zone=ug_installer" in argument for argument in limits[0])
+
+
+def test_the_installer_is_not_served_on_the_device_plane(config: Block) -> None:
+    """A device presenting a certificate has already been installed.
+
+    Every route on the mTLS listener is one more thing sitting behind a device
+    certificate, so one that exists for nobody should not be there at all.
+    """
+    device = _server_on(config, 8444)
+    installer = next(
+        (
+            block
+            for block in device.walk()
+            if block.kind == "location" and "installer" in block.argument
+        ),
+        None,
+    )
+    assert installer is not None, "the installer routes are not addressed on the device listener"
+    assert installer.values("return"), "the device listener proxies the installer routes"
+    assert not installer.values("proxy_pass")
+
+
 def test_the_login_endpoint_is_rate_limited(config: Block) -> None:
     """The other unauthenticated endpoint that does expensive work (Argon2id).
 
@@ -428,6 +480,226 @@ def test_only_modern_tls_is_offered(config: Block) -> None:
 # --------------------------------------------------------------------------- #
 # The parser itself, so a false pass is not possible
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# The single-hostname configuration, which is the one an INSTALLED agent can use
+# --------------------------------------------------------------------------- #
+#
+# `ubuntuguard-dev.conf` splits the planes across two ports, and an installed
+# agent cannot reach both: a second URL needs `UG_AGENT_DEVICE_URL`, which is a
+# dev-only override that forces `release_build` to False, and
+# `ALLOWED_CONFIG_KEYS` has no third key to carry one. So that configuration is
+# for development only, and this one is what a real deployment uses.
+#
+# It relies on `ssl_verify_client optional` plus the application's own check
+# rather than on nginx aborting the handshake. These tests pin the three things
+# that makes sound.
+
+
+@pytest.fixture(scope="module")
+def single_host(nginx_dir: Path) -> Block:
+    path = nginx_dir / "ubuntuguard-single-host.conf"
+    if not path.is_file():
+        pytest.fail(f"{path} is missing; an installed agent has no usable configuration")
+    return parse(path.read_text(encoding="utf-8"))
+
+
+def test_the_single_host_listener_requests_a_client_certificate(single_host: Block) -> None:
+    """`optional`, which is the only value that serves both planes.
+
+    `on` would abort the handshake for a device that has no certificate yet,
+    which is exactly the state `POST /enroll` exists to resolve. `off` would
+    mean no certificate is ever forwarded and the device plane could not
+    authenticate anybody.
+    """
+    servers = [block for block in single_host.walk() if block.kind == "server"]
+    assert len(servers) == 1, f"expected exactly one server block, found {len(servers)}"
+
+    verify = servers[0].values("ssl_verify_client")
+    assert verify == [["optional"]], f"expected `ssl_verify_client optional`, found {verify}"
+
+
+def test_the_single_host_listener_verifies_the_chain_against_the_device_ca(
+    single_host: Block,
+) -> None:
+    """This is what makes `optional` safe rather than decorative.
+
+    `optional` validates a presented certificate against this CA, so SUCCESS
+    means "issued by the internal device CA" exactly as it does on the
+    two-listener config. Point it at a public bundle and any publicly issued
+    certificate becomes a valid device identity.
+    """
+    server = next(block for block in single_host.walk() if block.kind == "server")
+
+    client_ca = server.values("ssl_client_certificate")
+    assert client_ca, "the listener forwards certificates without verifying any chain"
+
+    client_ca_path = client_ca[0][0]
+    assert client_ca_path != server.values("ssl_certificate")[0][0]
+    assert "device" in Path(client_ca_path).name, (
+        f"{client_ca_path} does not look like the device CA"
+    )
+    assert server.values("ssl_verify_depth") == [["1"]]
+
+
+def test_the_single_host_config_uses_no_conditional(nginx_dir: Path) -> None:
+    """The objection README.md raised against `optional`, and why it does not apply.
+
+    The documented concern was that `optional` puts enforcement "in a
+    conditional that is easy to edit wrongly", and nginx's `if` in a location
+    context is documented as surprising. There is no `if` in this file: the
+    enforcement is `device_auth.py` comparing the forwarded verify header
+    against SUCCESS, which it already did. If an `if` ever appears here, the
+    reasoning in the header comment has stopped being true.
+    """
+    text = (nginx_dir / "ubuntuguard-single-host.conf").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        code = line.split("#", 1)[0]
+        assert not re.match(r"\s*if\s*\(", code), f"a conditional appeared: {line!r}"
+
+
+def test_the_single_host_config_serves_both_planes(single_host: Block) -> None:
+    """The whole point: one listener an installed agent can use for everything.
+
+    Both locations must PROXY - not `return 421` as the two-port config does
+    for whichever plane it is not serving.
+    """
+    locations = {block.argument: block for block in single_host.walk() if block.kind == "location"}
+
+    enroll = locations.get("= /api/v1/enroll")
+    assert enroll is not None, "enrollment is not served"
+    assert enroll.values("proxy_pass"), "enrollment is addressed but not proxied"
+    assert not enroll.values("return")
+
+    device = locations.get("^~ /api/v1/devices/me/")
+    assert device is not None, "the device plane is not served"
+    assert device.values("proxy_pass"), "the device plane is addressed but not proxied"
+    assert not device.values("return")
+
+
+def test_every_single_host_location_overwrites_the_identity_headers(
+    single_host: Block,
+) -> None:
+    """The inheritance trap again, and it matters more here.
+
+    On this listener a caller CAN complete a handshake without a certificate,
+    so a location that failed to overwrite `X-Client-Verify` would let that
+    caller supply `SUCCESS` itself and authenticate as any device whose
+    certificate it could guess the fingerprint of.
+    """
+    offenders = [
+        block.argument
+        for block in single_host.walk()
+        if block.kind == "location"
+        and block.values("proxy_pass")
+        and INSTALLED_INCLUDE_PATH
+        not in {arguments[0] for arguments in block.values("include") if arguments}
+    ]
+    assert not offenders, (
+        "these locations proxy without overwriting the client-identity headers, "
+        f"so a caller could supply its own: {offenders}"
+    )
+
+
+def test_the_two_configurations_use_different_ports(config: Block, single_host: Block) -> None:
+    """Not so they can coexist - they cannot - but so the failure is legible.
+
+    An operator who installs the single-host config while the dev one is still
+    present gets a `limit_req_status is duplicate` error, which names the real
+    problem. If they also shared a port they could instead get "address already
+    in use", which reads like a stray process rather than two configurations
+    answering the same question.
+    """
+
+    def ports(block: Block) -> set[int]:
+        found: set[int] = set()
+        for server in (item for item in block.walk() if item.kind == "server"):
+            found |= _listen_ports(server)
+        return found
+
+    shared = ports(config) & ports(single_host)
+    assert not shared, f"both configurations listen on {sorted(shared)}"
+
+
+#: Directives that may appear only ONCE in an `http{}` context. Everything in
+#: conf.d is included there, so two files each declaring one of these makes
+#: nginx refuse to start with "directive is duplicate".
+#:
+#: `limit_req_zone` is deliberately absent: repeating it is legal and expected,
+#: because each occurrence declares a differently-named zone.
+HTTP_SINGLETON_DIRECTIVES = (
+    "limit_req_status",
+    "limit_conn_status",
+    "server_tokens",
+    "client_max_body_size",
+)
+
+
+def test_no_two_configurations_declare_the_same_http_singleton_directive(
+    nginx_dir: Path,
+) -> None:
+    """The test that was missing, and it cost a failed `nginx -t` to find.
+
+    `limit_req_status 429` is declared at http level by both
+    `ubuntuguard-dev.conf` and `ubuntuguard-single-host.conf`. Installing both
+    into conf.d therefore produces:
+
+        [emerg] "limit_req_status" directive is duplicate
+
+    The configurations are alternatives and that error is the correct outcome -
+    but nothing in this file detected the overlap, so it surfaced as a broken
+    reload on someone's machine instead of as a failing test. This asserts the
+    overlap is known and documented rather than accidental.
+
+    A third configuration that reintroduced the clash without saying so now
+    fails here.
+    """
+    declared: dict[str, list[str]] = {}
+    for path in sorted(nginx_dir.glob("*.conf")):
+        parsed = parse(path.read_text(encoding="utf-8"))
+        # Top-level only: a directive inside a server{} or location{} block is
+        # a different context and may legitimately repeat across files.
+        for directive, _ in parsed.directives:
+            if directive in HTTP_SINGLETON_DIRECTIVES:
+                declared.setdefault(directive, []).append(path.name)
+
+    clashes = {directive: files for directive, files in declared.items() if len(files) > 1}
+    for directive, files in clashes.items():
+        for name in files:
+            text = (nginx_dir / name).read_text(encoding="utf-8")
+            assert "INSTALL ONE" in text or "alternatives" in text.lower(), (
+                f"{name} declares the http-level singleton {directive!r}, which "
+                f"{[other for other in files if other != name]} also declares, but "
+                "it does not document that these configurations are mutually "
+                "exclusive. Installing both makes nginx refuse to start."
+            )
+
+
+def test_the_single_host_config_rate_limits_and_stays_on_loopback(
+    single_host: Block,
+) -> None:
+    """Same controls as the dev config: the endpoints are identical."""
+    zones = {
+        argument.split("=", 1)[1].split(":", 1)[0]
+        for arguments in single_host.values("limit_req_zone")
+        for argument in arguments
+        if argument.startswith("zone=")
+    }
+    assert any("enroll" in zone for zone in zones), f"no enroll rate limit; found {zones}"
+    assert any("login" in zone for zone in zones)
+    assert any("installer" in zone for zone in zones)
+
+    for upstream in (block for block in single_host.walk() if block.kind == "upstream"):
+        for arguments in upstream.values("server"):
+            assert arguments[0].startswith(("127.0.0.1:", "[::1]:", "localhost:"))
+
+    server = next(block for block in single_host.walk() if block.kind == "server")
+    for arguments in server.values("listen"):
+        assert arguments[0].startswith(("127.0.0.1:", "[::1]:")), (
+            f"listen {arguments[0]} is not bound to loopback in a development config"
+        )
+    assert set(server.values("ssl_protocols")[0]) <= {"TLSv1.2", "TLSv1.3"}
 
 
 def test_the_parser_finds_nested_locations() -> None:

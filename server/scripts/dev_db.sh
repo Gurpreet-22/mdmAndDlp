@@ -115,6 +115,7 @@ UBUNTUGUARD_MIGRATION_DATABASE_URL=postgresql+psycopg://ubuntuguard_owner:${owne
 UBUNTUGUARD_POLICY_SIGNING_KEY_PATH=var/policy-signing.key
 UBUNTUGUARD_CA_KEY_PATH=var/ca.key
 UBUNTUGUARD_CA_CERT_PATH=var/ca.crt
+UBUNTUGUARD_INSTALLER_DIR=var/installer
 EOF
   )
   chmod 600 "${ENV_FILE}"

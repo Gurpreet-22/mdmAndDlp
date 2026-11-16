@@ -37,11 +37,13 @@ from tls_harness import (
 )
 from ubuntuguard_agent.config import AgentConfig, AgentPaths, AgentSettings
 from ubuntuguard_agent.enrollment import (
+    ENROLLMENT_PROMPT,
     MAX_TOKEN_LENGTH,
     MIN_TOKEN_LENGTH,
     build_enroll_payload,
     enroll,
     read_token_from_file,
+    read_token_from_prompt,
     read_token_from_stdin,
 )
 from ubuntuguard_agent.errors import EnrollmentError, TlsVerificationError
@@ -214,6 +216,89 @@ def test_an_empty_token_is_refused() -> None:
     with pytest.raises(EnrollmentError) as raised:
         read_token_from_stdin(io.StringIO("   \n"))
     assert "empty" in str(raised.value)
+
+
+# --------------------------------------------------------------------------- #
+# The interactive prompt, which is the channel the employee installer uses
+# --------------------------------------------------------------------------- #
+
+
+def test_a_prompted_token_is_accepted_and_stripped() -> None:
+    assert read_token_from_prompt(lambda _prompt: f"  {TOKEN}\n") == TOKEN
+
+
+def test_the_prompt_asks_for_what_the_brief_specifies() -> None:
+    """The employee sees one wording, and it names what they are being asked for.
+
+    Asserted on the constant rather than on captured output because the string
+    is also what the installer's documentation quotes, and the two drifting
+    apart would leave an employee looking for a prompt that does not exist.
+    """
+    seen: list[str] = []
+
+    def record(prompt: str) -> str:
+        seen.append(prompt)
+        return TOKEN
+
+    read_token_from_prompt(record)
+    assert seen == [ENROLLMENT_PROMPT]
+    assert "UbuntuGuard enrollment token" in ENROLLMENT_PROMPT
+
+
+def test_a_prompted_token_is_registered_for_redaction_before_it_is_validated() -> None:
+    """The ordering guarantee, same as the other two readers.
+
+    Registration happens inside `_accept_token` before any validation can
+    raise, so a rejected token cannot reach a log through a traceback either.
+    Checked with a value that FAILS validation, which is the case where the
+    ordering actually matters.
+    """
+    SECRETS.clear()
+    doomed = "Q" * (MAX_TOKEN_LENGTH + 1)
+
+    with pytest.raises(EnrollmentError):
+        read_token_from_prompt(lambda _prompt: doomed)
+
+    assert SECRETS.scrub(f"value {doomed}") == "value ***REDACTED***"
+    SECRETS.clear()
+
+
+@pytest.mark.parametrize("interrupt", [EOFError, KeyboardInterrupt])
+def test_abandoning_the_prompt_is_a_refusal_not_a_traceback(
+    interrupt: type[BaseException],
+) -> None:
+    """Ctrl-D and Ctrl-C at the prompt.
+
+    The employee changed their mind or does not have the token yet. That is a
+    normal outcome and must read as one, rather than as the installer crashing.
+    """
+
+    def abandon(_prompt: str) -> str:
+        raise interrupt
+
+    with pytest.raises(EnrollmentError) as raised:
+        read_token_from_prompt(abandon)
+    assert "no enrollment token was entered" in str(raised.value)
+
+
+def test_the_prompt_refuses_to_run_without_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise `getpass` falls back to stdin and ECHOES the token.
+
+    This is the one failure mode of the prompt channel that would leak the
+    credential: with no controlling terminal, `getpass.getpass` warns and reads
+    stdin in echo mode, so the token appears on screen and in the terminal's
+    scrollback. Refusing is the only safe answer, and the message has to name
+    the alternative or an unattended installer has nowhere to go.
+    """
+    monkeypatch.setattr("sys.stdin", io.StringIO(TOKEN))
+
+    with pytest.raises(EnrollmentError) as raised:
+        read_token_from_prompt()
+    message = str(raised.value)
+    assert "needs a terminal" in message
+    assert "--token-stdin" in message
 
 
 # --------------------------------------------------------------------------- #

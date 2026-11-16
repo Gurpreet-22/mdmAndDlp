@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import ErrorBanner from "../components/ErrorBanner";
+import UserActionsDialog from "../components/UserActionsDialog";
+import type { UserAction } from "../components/UserActionsDialog";
 import { api } from "../api/client";
 import type { AdminRole, UserResponse } from "../api/client";
 import { useAuth } from "../auth";
@@ -62,6 +64,13 @@ export default function UsersPage() {
 
   const [search, setSearch] = useState("");
 
+  /** Which account the enable / role / reset dialog is open for. */
+  const [dialog, setDialog] = useState<{ action: UserAction; user: UserResponse } | null>(null);
+  /** Confirmation of the last completed action. Cleared by the next one. */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** The row with an action in flight, so only its buttons are disabled. */
+  const [pending, setPending] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -104,12 +113,24 @@ export default function UsersPage() {
 
   async function disable(userId: string) {
     setError(null);
+    setNotice(null);
+    setPending(userId);
     try {
       await api.disableUser(userId);
       await load();
+      setNotice("Account disabled and signed out everywhere.");
     } catch (caught) {
       setError(caught);
+    } finally {
+      setPending(null);
     }
+  }
+
+  /** Open the enable / role / reset dialog for one account. */
+  function act(action: UserAction, row: UserResponse) {
+    setError(null);
+    setNotice(null);
+    setDialog({ action, user: row });
   }
 
   return (
@@ -125,6 +146,28 @@ export default function UsersPage() {
       </div>
 
       <ErrorBanner error={error} />
+
+      {notice && (
+        <div className="banner success" role="status">
+          <div className="banner-head">
+            <strong>Done</strong>
+            <button type="button" className="ghost small" onClick={() => setNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+          <p>{notice}</p>
+        </div>
+      )}
+
+      <UserActionsDialog
+        action={dialog?.action ?? null}
+        user={dialog?.user ?? null}
+        onClose={() => setDialog(null)}
+        onDone={(message) => {
+          setNotice(message);
+          void load();
+        }}
+      />
 
       {justCreated && (
         <div className="banner success">
@@ -272,19 +315,67 @@ export default function UsersPage() {
                     <span className={`pill ${row.is_active ? "active" : "revoked"}`}>
                       {row.is_active ? "active" : "disabled"}
                     </span>
+                    {/*
+                      Shown because it explains why an otherwise active
+                      account cannot do anything: the server refuses every
+                      capability route until they choose a password.
+                    */}
+                    {row.must_change_password && (
+                      <span className="pill warn" title="Must set a new password before using the console">
+                        password reset
+                      </span>
+                    )}
                   </td>
                   <td className="muted small">{row.created_at}</td>
                   <td className="muted small">
                     {row.last_login_at ?? <span className="muted">never</span>}
                   </td>
-                  <td>
-                    {row.is_active && !isSelf && (
+                  <td className="row-actions">
+                    {/*
+                      Hidden where the server would refuse anyway: you cannot
+                      disable or re-role your own account. Cosmetic only - the
+                      server checks regardless, and `cannot_change_own_role`
+                      would be returned if this were bypassed.
+                    */}
+                    {row.is_active ? (
+                      <>
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            className="ghost small"
+                            disabled={pending === row.id}
+                            onClick={() => act("role", row)}
+                          >
+                            Change role
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="ghost small"
+                          disabled={pending === row.id}
+                          onClick={() => act("reset-password", row)}
+                        >
+                          Reset password
+                        </button>
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            className="ghost small"
+                            disabled={pending === row.id}
+                            onClick={() => void disable(row.id)}
+                          >
+                            {pending === row.id ? "Working…" : "Disable"}
+                          </button>
+                        )}
+                      </>
+                    ) : (
                       <button
                         type="button"
                         className="ghost small"
-                        onClick={() => void disable(row.id)}
+                        disabled={pending === row.id}
+                        onClick={() => act("enable", row)}
                       >
-                        Disable
+                        Enable
                       </button>
                     )}
                   </td>

@@ -45,6 +45,18 @@ export default function Layout({ children }: { children: ReactNode }) {
             {user?.email}
             <span className="role-badge">{user?.role.replace(/_/g, " ")}</span>
           </span>
+          {/*
+            Not in the capability-filtered nav above, because no capability
+            guards it: every role can change its own password, and an account
+            that could not would have no way to rotate a credential it believed
+            was compromised.
+          */}
+          <NavLink to="/account/password" className="nav-link">
+            Password
+          </NavLink>
+          <a href="/enroll" target="_blank" rel="noreferrer" className="nav-link">
+            Enroll Portal ↗
+          </a>
           <button type="button" className="ghost" onClick={() => void logout()}>
             Sign out
           </button>

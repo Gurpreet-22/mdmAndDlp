@@ -9,6 +9,7 @@ import type {
   DeviceListQuery,
   DeviceSummary,
   EnrollmentTokenResponse,
+  InstallerInfoResponse,
   MeResponse,
   Problem,
   RegisterDeviceRequest,
@@ -44,8 +45,11 @@ export type {
   AuditEntryResponse,
   AuthModeResponse,
   ChainVerificationResponse,
+  ChangePasswordRequest,
+  ChangeRoleRequest,
   CreateEnrollmentTokenResponse,
   CreateUserRequest,
+  ResetPasswordRequest,
   DeviceCounts,
   DeviceDetail,
   DeviceListQuery,
@@ -53,6 +57,7 @@ export type {
   DeviceSummary,
   EnrollmentTokenResponse,
   FieldError,
+  InstallerInfoResponse,
   MeResponse,
   Problem,
   RegisterDeviceRequest,
@@ -227,8 +232,30 @@ export const api = {
     }
   },
 
+  /**
+   * The current user, re-read.
+   *
+   * Reachable even by an account that owes a forced password change - it is
+   * one of the two routes the server leaves open in that state, and is how the
+   * dashboard discovers both that the change is required and that it has been
+   * completed.
+   */
+  me: () => request<MeResponse>("/api/v1/auth/me"),
+
   /** Unauthenticated: the login page needs this before anyone has signed in. */
   authMode: () => request<AuthModeResponse>("/api/v1/auth/mode", { anonymous: true }),
+
+  /**
+   * Metadata for the agent installer. PUBLIC, and `anonymous` is load-bearing.
+   *
+   * The employee enrollment page is reached by someone with no UbuntuGuard
+   * account. Sending a bearer header would be pointless, and leaving the
+   * default behaviour in place would be worse than pointless: a 401 triggers
+   * `refreshSession`, and a failed refresh calls `onSessionLost`, which would
+   * bounce an employee to the admin login page they have no business seeing.
+   */
+  installerInfo: () =>
+    request<InstallerInfoResponse>("/api/v1/installer", { anonymous: true }),
 
   /**
    * Admin accounts, newest first. `search` is a substring of the address.
@@ -256,6 +283,59 @@ export const api = {
 
   disableUser: (userId: string) =>
     request<void>(`/api/v1/users/${encodeURIComponent(userId)}:disable`, { method: "POST" }),
+
+  /**
+   * Re-enable a disabled account, keeping its identity, role and password.
+   *
+   * The counterpart `disableUser` lacked. Until this existed, disabling was
+   * one-way through the API and two super_admins disabling each other was an
+   * unrecoverable lockout.
+   */
+  enableUser: (userId: string) =>
+    request<void>(`/api/v1/users/${encodeURIComponent(userId)}:enable`, { method: "POST" }),
+
+  /**
+   * Change another account's role. Revokes that account's sessions, because a
+   * live access token carries the role it was issued against.
+   *
+   * Refused for your own account, and for the last active super_admin.
+   */
+  changeUserRole: (userId: string, role: AdminRole) =>
+    request<void>(`/api/v1/users/${encodeURIComponent(userId)}:role`, {
+      method: "POST",
+      body: { role },
+    }),
+
+  /**
+   * Set a temporary password on another account.
+   *
+   * Returns nothing: the caller supplied the password, so echoing it back
+   * would put a live credential in a response for no gain. The target is
+   * signed out everywhere and must change the password before using the
+   * console.
+   */
+  resetUserPassword: (userId: string, password: string) =>
+    request<void>(`/api/v1/users/${encodeURIComponent(userId)}:reset-password`, {
+      method: "POST",
+      body: { password },
+    }),
+
+  /**
+   * Change your own password. Requires the current one.
+   *
+   * An access token is not authority to replace a credential, so the current
+   * password is verified server-side. The response is a fresh token pair which
+   * is installed here, because the change revokes every existing session
+   * including this one - without the swap, a user completing a *forced* change
+   * would be signed out by the act of satisfying it.
+   */
+  async changeOwnPassword(currentPassword: string, newPassword: string): Promise<void> {
+    const token = await request<TokenResponse>("/api/v1/auth/password", {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+    accessToken = token.access_token;
+  },
 
   listDevices: (query: DeviceListQuery = {}) =>
     request<DeviceSummary[]>("/api/v1/devices", { query: query as RequestOptions["query"] }),

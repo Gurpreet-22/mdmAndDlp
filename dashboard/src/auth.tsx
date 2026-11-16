@@ -19,6 +19,16 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   /**
+   * Re-read `/auth/me` and update the cached user.
+   *
+   * Needed because `must_change_password` changes server-side without any
+   * navigation: completing a password change clears it, and the app has to
+   * notice in order to stop rendering the forced-change screen. Without this
+   * the user would hold a perfectly good new session while the UI still
+   * insisted they owed a change.
+   */
+  refresh: () => Promise<void>;
+  /**
    * Whether the signed-in role holds a capability.
    *
    * Used to hide controls the user cannot use. This is COSMETIC: the server
@@ -29,7 +39,18 @@ interface AuthState {
   can: (capability: string) => boolean;
 }
 
-const AuthContext = createContext<AuthState | null>(null);
+/**
+ * Exported so tests can supply a session directly.
+ *
+ * The alternative is mounting `AuthProvider` and mocking the API calls it
+ * makes on start-up, which couples every component test to the shape of
+ * session restoration. Providing the context value states the precondition the
+ * test actually cares about - "a signed-in it_admin who owes a password
+ * change" - in one line.
+ *
+ * Application code should use `useAuth`, not this.
+ */
+export const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse | null>(null);
@@ -65,6 +86,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const refresh = useCallback(async () => {
+    // `me()` rather than `restoreSession()`: the caller already holds a valid
+    // access token - it was just reissued by the password change - and
+    // restoring would spend the refresh cookie for no reason. A failure here
+    // leaves the cached user alone rather than signing them out, because the
+    // operation that prompted it has already succeeded on the server.
+    try {
+      setUser(await api.me());
+    } catch {
+      // Intentionally swallowed; the client's own 401 handling covers a session
+      // that has genuinely gone.
+    }
+  }, []);
+
   const capabilities = useMemo(() => new Set(user?.capabilities ?? []), [user]);
   const can = useCallback(
     (capability: string) => capabilities.has(capability),
@@ -72,8 +107,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthState>(
-    () => ({ user, loading, login, logout, can }),
-    [user, loading, login, logout, can],
+    () => ({ user, loading, login, logout, refresh, can }),
+    [user, loading, login, logout, refresh, can],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

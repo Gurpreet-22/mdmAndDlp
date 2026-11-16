@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     ca_key_path: Path | None = None
     ca_cert_path: Path | None = None
 
+    # --- Employee-facing agent installer ----------------------------------- #
+    installer_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Directory holding the built agent installer and its manifest, as "
+            "produced by agent/packaging/build_installer.py. Served read-only and "
+            "unauthenticated to employees at GET /installer and "
+            "/installer/download, because an enrolling employee has no credential "
+            "yet. The artifact contains no private key, no certificate and no "
+            "enrollment token - only the server URL and, for an internal CA, that "
+            "CA's public certificate. Unset means no installer is published and "
+            "both routes report that."
+        ),
+    )
+
     # --- Proxy trust ------------------------------------------------------- #
     trusted_proxy_ips: frozenset[str] = Field(
         default=frozenset({"127.0.0.1", "::1"}),

@@ -56,9 +56,34 @@ ACTIONS = frozenset(
         "user_created",
         "user_role_changed",
         "user_disabled",
+        # The counterpart to `user_disabled`. A separate action rather than a
+        # field on that one, because "was this account ever disabled, and when
+        # did it come back" is a question an auditor asks directly and should
+        # not have to answer by correlating.
+        "user_enabled",
         # Operator set a password on an existing account, via the CLI. Records
         # that the credential changed; never the credential itself.
         "user_password_set",
+        # --- password changes, three actions because they answer three
+        # --- different questions --------------------------------------------
+        #
+        # `user_password_reset` is an ADMINISTRATOR setting a temporary
+        # password on somebody else's account. It is the one that matters for
+        # review: it is the only route by which one super_admin can take over
+        # another's identity, so the row names the actor and the target and the
+        # fact that a forced change was imposed.
+        "user_password_reset",
+        # `password_changed` is a user changing their OWN password, having
+        # proved they know the current one. Its detail records whether this
+        # completed a forced change, which is what closes the loop on a
+        # `user_password_reset` above - the pair together show that the
+        # account's real owner took it back.
+        "password_changed",
+        # `password_change_failed` is a self-service attempt with the wrong
+        # current password. Recorded because an authenticated session guessing
+        # at its own account's password is either a confused user or a stolen
+        # token, and the two look identical from one row but not from twenty.
+        "password_change_failed",
         # Every live session for an account was revoked without disabling it.
         # Separate from `user_disabled` because the two have different
         # consequences and an operator needs to tell them apart in the log.

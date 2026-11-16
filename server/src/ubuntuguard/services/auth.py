@@ -358,3 +358,124 @@ def logout(
         detail={"tokens_revoked": revoked},
     )
     session.commit()
+
+
+def change_own_password(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    current_password: str,
+    new_password: str,
+    request_id: str | None = None,
+) -> LoginResult:
+    """Change the signed-in user's own password and re-establish the session.
+
+    Returns a fresh token pair, and that is the design rather than a
+    convenience. The sequence is:
+
+      1. Verify the CURRENT password. An access token alone is not sufficient
+         authority to replace a credential - a stolen token would otherwise be
+         an account takeover, and the fifteen-minute lifetime is what currently
+         bounds the damage of one. This is the only check that stops that.
+      2. Refuse a new password equal to the old one. Checked by verifying the
+         proposed password against the stored hash, which costs one Argon2
+         verification and no schema: if it verifies, it is the same password.
+         Note this prevents reuse of the CURRENT password only; preventing
+         reuse of the previous N would need a password-history table, which
+         does not exist and is not invented here.
+      3. Validate against policy, via `hash_password`, which calls
+         `validate_password`. One policy, one place.
+      4. Replace the hash and clear `must_change_password`. This is the only
+         route that clears it, so a user put into a forced change can leave
+         that state exactly one way: by proving they know the temporary
+         password and choosing a new one.
+      5. Revoke every session, then issue a new pair.
+
+    Step 5 is worth reading twice. Revoking everything is correct after a
+    credential change - any session opened with the old password is suspect,
+    including one whose refresh token an attacker already holds - but revoking
+    and stopping there would sign the user out of the tab they are using,
+    which for a FORCED change means they could never get past the screen
+    telling them to change it. So every old session dies and one new one is
+    issued, in the same transaction. The caller sets the new refresh cookie.
+
+    The lockout counters are untouched. A password change is not a failed login
+    and must not clear a standing lock, or an attacker who learned a password
+    could use this route to escape a lockout they had triggered.
+    """
+    user = repositories.get_user(session, user_id)
+    if user is None or not user.is_active:
+        # Resolved from a valid access token moments ago, so this is a race
+        # with a disable rather than a bad request. Same vague body as every
+        # other authentication failure.
+        raise problems.invalid_credentials(
+            audit_detail=f"user {user_id} is missing or disabled at password change"
+        )
+
+    if not passwords.verify_password(user.password_hash, current_password):
+        # Recorded as a failed attempt so it feeds the same lockout window as
+        # login: without this, this route would be an unthrottled oracle for
+        # guessing the current password of an already-compromised session.
+        repositories.record_login_attempt(session, email=user.email, succeeded=False)
+        audit.append(
+            session,
+            action="password_change_failed",
+            actor_id=str(user.id),
+            actor_role=user.role,
+            target_type="user",
+            target_id=str(user.id),
+            request_id=request_id,
+            detail={"reason": "wrong_current_password"},
+        )
+        session.commit()
+        raise problems.invalid_credentials(
+            audit_detail=f"wrong current password for user {user.id}"
+        )
+
+    if passwords.verify_password(user.password_hash, new_password):
+        raise problems.conflict(
+            "password_unchanged",
+            "The new password must be different from the current one.",
+        )
+
+    try:
+        new_hash = passwords.hash_password(new_password)
+    except passwords.PasswordPolicyError as exc:
+        raise problems.validation_failed(
+            [problems.FieldError(field="new_password", message=str(exc))]
+        ) from exc
+
+    was_forced = user.must_change_password
+    repositories.update_password_hash(session, user, new_hash)
+    repositories.set_must_change_password(session, user, False)
+    revoked = repositories.revoke_all_sessions(session, user)
+
+    access, refresh, family_id = repositories.issue_token_pair(session, user_id=user.id)
+
+    audit.append(
+        session,
+        action="password_changed",
+        actor_id=str(user.id),
+        actor_role=user.role,
+        target_type="user",
+        target_id=str(user.id),
+        request_id=request_id,
+        # No password, no hash, no fingerprint of either. `was_forced` is what
+        # closes the loop on an administrator reset: it is the record that the
+        # subject of that reset actually took over the account.
+        detail={
+            "self_service": True,
+            "completed_forced_change": was_forced,
+            "sessions_revoked": revoked,
+        },
+    )
+    session.commit()
+
+    return LoginResult(
+        user_id=user.id,
+        email=user.email,
+        role=Role(user.role),
+        access=access,
+        refresh=refresh,
+        family_id=family_id,
+    )

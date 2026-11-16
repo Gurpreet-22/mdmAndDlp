@@ -129,6 +129,18 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    #: Set by an administrator password reset, cleared by a successful
+    #: self-service change. While true, `require_capability` refuses every
+    #: capability-guarded route, so the account can do nothing but read
+    #: `/auth/me`, change its password, and sign out.
+    #:
+    #: `server_default` is what makes NOT NULL safe to add to a populated
+    #: table: PostgreSQL backfills existing rows with false, so no current
+    #: administrator is forced into a reset by the migration. Same pattern as
+    #: `is_active` above.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     locked_until: Mapped[dt.datetime | None] = timestamp(nullable=True)
     created_at: Mapped[dt.datetime] = timestamp(nullable=False, server_default=func.now())
     updated_at: Mapped[dt.datetime] = timestamp(nullable=False, server_default=func.now())

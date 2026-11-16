@@ -659,3 +659,145 @@ dialog.modal::backdrop {
   content: "○";
   color: var(--muted);
 }
+
+/* ----------------------------------------------- employee enrollment page --- */
+/*
+ * The /enroll page, which is the only thing in this app an unauthenticated
+ * visitor sees. It renders OUTSIDE `.shell`, so it has no topbar, no navigation
+ * and no sign-out button - an employee is not a user of the admin console and
+ * the layout should not suggest otherwise.
+ *
+ * Reuses `.card`, `.banner`, `.feature-list`, `.token`, `.token-row`, `.muted`
+ * and `.brand` unchanged. What is added below is the page frame, the download
+ * button, and three small things the admin pages had no need for.
+ */
+.enroll-shell {
+  min-height: 100%;
+  /* Wider than `.login` and narrower than the admin content area: this is a
+     page of prose, and prose at full table width is unreadable. */
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.enroll-head {
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+.enroll-head .brand {
+  justify-content: center;
+}
+.enroll-head p {
+  margin: 0.35rem 0 0;
+}
+.enroll-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.enroll-foot {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  text-align: center;
+}
+.enroll-foot p {
+  margin: 0.25rem 0;
+}
+
+/* The one action on the page, so it is the one thing that looks like one.
+   An <a download> rather than a button: the browser's own download handling is
+   what an employee expects, and it needs no JavaScript to work. */
+.download-button {
+  display: block;
+  margin: 1rem 0 0.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--accent);
+  color: #1a1004;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 1.02rem;
+  text-align: center;
+  text-decoration: none;
+}
+.download-button:hover {
+  filter: brightness(1.08);
+}
+
+/* Version, size and target server, shown beside the download so an employee
+   can confirm they have their own company's agent before running it. */
+.download-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 1rem 0 0;
+}
+.download-facts dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.download-facts dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* `.steps` is styled as a hint list for the admin pages. Here the steps are
+   the instructions themselves, so they get body-text colour and room. */
+.steps.numbered {
+  color: var(--text);
+  font-size: 0.95rem;
+  padding-left: 1.4rem;
+}
+.steps.numbered li {
+  margin-bottom: 0.7rem;
+}
+.steps.numbered code {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.2rem 0.4rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.86rem;
+}
+
+.small-head {
+  margin: 1.1rem 0 0.3rem;
+  font-size: 0.95rem;
+}
+.small-head:first-of-type {
+  margin-top: 0.6rem;
+}
+
+/* A 64-character hex digest has no spaces to wrap at. */
+.token.break {
+  font-family: var(--mono);
+  font-size: 0.84rem;
+}
+
+/* ------------------------------------------------- user row actions --- */
+/*
+ * The Administrators table now carries up to three actions per row (change
+ * role, reset password, disable / enable) where it previously had one. Without
+ * wrapping, a narrow window pushes the table into a horizontal scroll and the
+ * buttons end up off screen.
+ */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+.row-actions button {
+  white-space: nowrap;
+}
+
+/* A second pill beside the active/disabled one, for an account that owes a
+   password change. Needs separating from the state pill it sits next to. */
+td .pill + .pill {
+  margin-left: 0.35rem;
+}

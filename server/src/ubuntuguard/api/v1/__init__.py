@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ubuntuguard import problems
-from ubuntuguard.api.v1 import audit_log, auth, devices, enrollment, users
+from ubuntuguard.api.v1 import audit_log, auth, devices, enrollment, installer, users
 
 
 def build_router() -> APIRouter:
@@ -18,6 +18,13 @@ def build_router() -> APIRouter:
     # here. That also puts `Problem` into the OpenAPI components, which is what
     # gives the generated TypeScript client a typed error to work with.
     router = APIRouter(responses=problems.ERROR_RESPONSES)
+
+    # --- Public: no credential of any kind ------------------------------- #
+    # The agent installer and its metadata. An employee reaching the enrollment
+    # page has no UbuntuGuard credential and is not an administrator, and the
+    # artifact holds no secret - see installer.py for why that is safe and for
+    # what still gates enrollment.
+    router.include_router(installer.router)
 
     # --- Admin plane: bearer token, capability-checked ------------------- #
     router.include_router(auth.router)

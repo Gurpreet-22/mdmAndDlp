@@ -129,14 +129,62 @@ class MeResponse(BaseModel):
             "not a security boundary."
         )
     )
+    must_change_password: bool = Field(
+        description=(
+            "True when this account must set a new password before doing anything "
+            "else. The dashboard uses it to show the change-password screen; the "
+            "server already refuses every capability-guarded route, so this is "
+            "how the UI learns why, not what enforces it."
+        )
+    )
+
+
+#: The four roles, as a type. Declared once so `CreateUserRequest` and
+#: `ChangeRoleRequest` cannot drift apart, and so adding a role is one edit.
+AdminRoleName = Literal["super_admin", "it_admin", "security_analyst", "auditor"]
+
+#: A new password, bounded at both ends. The minimum is enforced here as well
+#: as in `passwords.validate_password` - here so the caller gets a 422 naming
+#: the field, there because that is the single policy every path goes through.
+NewPassword = Annotated[
+    str, StringConstraints(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
+]
 
 
 class CreateUserRequest(StrictModel):
     email: AdminEmail
-    password: Annotated[
-        str, StringConstraints(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
-    ]
-    role: Literal["super_admin", "it_admin", "security_analyst", "auditor"]
+    password: NewPassword
+    role: AdminRoleName
+
+
+class ChangeRoleRequest(StrictModel):
+    """Body of `POST /users/{id}:role`. The target comes from the path."""
+
+    role: AdminRoleName
+
+
+class ResetPasswordRequest(StrictModel):
+    """Body of `POST /users/{id}:reset-password`.
+
+    The administrator supplies the temporary password, matching how
+    `CreateUserRequest` works, so the response needs to carry no credential at
+    all - the caller already has the value they just sent.
+    """
+
+    password: NewPassword
+
+
+class ChangePasswordRequest(StrictModel):
+    """Body of `POST /auth/password`.
+
+    `current_password` is bounded by `MAX_PASSWORD_BYTES` but has no minimum:
+    it is an existing credential being verified, not a new one being set, and
+    applying new-password policy to it would refuse a legitimate change for an
+    account whose password predates the current rules.
+    """
+
+    current_password: Annotated[str, StringConstraints(min_length=1, max_length=MAX_PASSWORD_BYTES)]
+    new_password: NewPassword
 
 
 class UserResponse(BaseModel):
@@ -144,6 +192,12 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    must_change_password: bool = Field(
+        description=(
+            "True when an administrator has reset this account's password. Until "
+            "the user sets a new one, every capability-guarded route refuses them."
+        )
+    )
     created_at: dt.datetime
     last_login_at: dt.datetime | None
 
@@ -186,6 +240,46 @@ class CreateEnrollmentTokenResponse(BaseModel):
     )
     expires_at: dt.datetime
     label: str | None
+
+
+class InstallerInfoResponse(BaseModel):
+    """Metadata for the employee-facing agent installer. Public.
+
+    Served unauthenticated, because the enrollment page is reached by an
+    employee who has no credential and is not an administrator. Nothing here is
+    sensitive: the digest, size and version describe a file that is itself
+    published, and the server URL is the one the caller is already talking to.
+
+    Note that `target_os_versions` and `validated_os_versions` are two separate
+    claims and must stay that way. The first says which releases the agent is
+    written for; the second says which it has actually been exercised on, and
+    it is empty. Collapsing them into one "supported" list is exactly the
+    overstatement the brief forbids, and the enrollment page renders the
+    difference.
+    """
+
+    agent_version: str
+    filename: str
+    sha256: Hex64 = Field(
+        description="SHA-256 of the installer, recomputed from the file on every request."
+    )
+    size_bytes: int
+    built_at: dt.datetime
+    server_url: str = Field(
+        description="The API URL baked into the installer, so an employee can confirm it."
+    )
+    minimum_python: str
+    supported_os_id: str
+    supported_arch: list[str]
+    target_os_versions: list[str] = Field(
+        description="Releases the agent is written for. NOT a statement that it was tested."
+    )
+    validated_os_versions: list[str] = Field(
+        description=(
+            "Releases the agent has actually been run on. Empty until that work is "
+            "done and the evidence committed."
+        )
+    )
 
 
 class EnrollmentTokenResponse(BaseModel):

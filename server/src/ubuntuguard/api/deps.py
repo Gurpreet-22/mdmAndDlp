@@ -20,6 +20,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from ubuntuguard import problems
+from ubuntuguard.config import Settings
 from ubuntuguard.security.device_auth import (
     ClientCertificate,
     DeviceAuthError,
@@ -35,6 +36,15 @@ class Principal:
     user_id: str
     email: str
     role: Role
+    #: True when an administrator has reset this account's password and the
+    #: user has not yet chosen a new one. `require_capability` refuses every
+    #: route while it is set, so the account can reach only `/auth/me`,
+    #: `/auth/password` and `/auth/logout`.
+    #:
+    #: Defaulted so that constructing a Principal without it - which several
+    #: tests and the unconfigured resolver do - means "no forced change",
+    #: rather than silently locking out every caller in those paths.
+    must_change_password: bool = False
 
     def __repr__(self) -> str:
         # No token material is held here, but keep the habit: identity objects
@@ -170,6 +180,23 @@ def get_keys(request: Request) -> object:
     return keys
 
 
+def get_settings(request: Request) -> Settings:
+    """The application's resolved settings.
+
+    Read from `app.state` rather than constructed, so a handler sees the same
+    configuration the lifespan validated at start-up. Constructing `Settings()`
+    per request would re-read the environment and the `.env` file, which is
+    both wasteful and a way for a handler to disagree with the rest of the
+    process about what is configured.
+
+    No 503 branch: `create_app` always sets this, so its absence would be a
+    programming error rather than a deployment state, and masking it as
+    "unavailable" would hide the bug.
+    """
+    settings: Settings = request.app.state.settings
+    return settings
+
+
 def _bearer_token(request: Request) -> str:
     header = request.headers.get("authorization", "")
     scheme, _, value = header.partition(" ")
@@ -198,10 +225,28 @@ def get_principal(request: Request) -> Principal:
 
 
 def require_capability(capability: Capability) -> Callable[[Principal], Principal]:
-    """Build a dependency enforcing one capability.
+    """Build a dependency enforcing one capability, and the forced password change.
 
     Routes declare the capability they need, never the roles. Adding a role
     later touches the matrix in `rbac.py` and nothing else.
+
+    **The forced-password-change gate lives here, and that placement is the
+    enforcement.** Every route on the admin plane except `GET /auth/me` depends
+    on this function, so one check covers all of them and no route has to
+    remember. What stays reachable is exactly what a user in that state needs:
+    `/auth/me` to learn why, `POST /auth/password` to get out of it, and
+    `/auth/logout` to leave. The frontend redirect is a courtesy on top of
+    this, not the control - a caller with a valid access token and curl gets
+    the same 403.
+
+    The order matters: the capability is checked FIRST. An `auditor` whose
+    password was reset gets `forbidden` from the route they are not allowed to
+    call anyway, rather than `password_change_required`, so the forced-change
+    state cannot be used to probe which capabilities a role holds.
+
+    `tests/test_route_capability_coverage.py` asserts that every admin route
+    either passes through here or is on an explicit allowlist, because a future
+    route using `get_principal` directly would bypass both checks silently.
     """
 
     def dependency(principal: Principal = Depends(get_principal)) -> Principal:
@@ -210,6 +255,13 @@ def require_capability(capability: Capability) -> Callable[[Principal], Principa
                 audit_detail=(
                     f"role {principal.role.value} lacks {capability.value} "
                     f"(user {principal.user_id})"
+                )
+            )
+        if principal.must_change_password:
+            raise problems.password_change_required(
+                audit_detail=(
+                    f"user {principal.user_id} must change their password before "
+                    f"using {capability.value}"
                 )
             )
         return principal

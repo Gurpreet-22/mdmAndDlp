@@ -17,15 +17,19 @@ states, but only one of them means the device is actually managed.
 `enroll` is a separate command rather than something `run` does on its own
 start-up. That is feature D11 and it is a deliberate constraint: enrollment
 spends a single-use token and creates an auditable identity, so it is an
-operator action with a person behind it, not a side effect of a service
-starting. It also means a laptop that is reimaged does not silently acquire a
-second device record because systemd brought the agent up.
+action with a person behind it, not a side effect of a service starting. It
+also means a laptop that is reimaged does not silently acquire a second device
+record because systemd brought the agent up. The person is an administrator
+when `--token-file` is used and the employee at the keyboard when
+`--token-prompt` is, which is the same constraint either way: somebody typed or
+placed a single-use credential deliberately.
 
 **There is no `--token` option, and its absence is a security control.**
 See `enrollment.read_token_from_file` for why. An option that accepted a token
 and then warned about it would be worse than none: by the time the warning is
 printed, `/proc/<pid>/cmdline` has already published the value to every user
-on the machine.
+on the machine. The three readers that do exist - a 0600 file, standard input,
+and a no-echo prompt - are the three channels that keep the value out of argv.
 """
 
 from __future__ import annotations
@@ -41,7 +45,12 @@ from typing import Any
 
 from ubuntuguard_agent import __version__
 from ubuntuguard_agent.config import AgentConfig, load_config
-from ubuntuguard_agent.enrollment import enroll, read_token_from_file, read_token_from_stdin
+from ubuntuguard_agent.enrollment import (
+    enroll,
+    read_token_from_file,
+    read_token_from_prompt,
+    read_token_from_stdin,
+)
 from ubuntuguard_agent.errors import AgentError, ConfigError, InsecureFileError
 from ubuntuguard_agent.identity import (
     PRIVATE_FILE_MODE,
@@ -93,10 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Generate a device keypair, exchange a one-time token and a CSR for a "
             "client certificate, and install it. The private key is generated on "
             "this machine and never transmitted.\n\n"
-            "The token must come from a file or from standard input. There is "
-            "deliberately no option to pass it as an argument: anything in a "
-            "command line is readable by every user on the machine via "
-            "/proc/<pid>/cmdline and visible in ps."
+            "The token must come from a file, from standard input, or from a "
+            "no-echo terminal prompt. There is deliberately no option to pass it "
+            "as an argument: anything in a command line is readable by every user "
+            "on the machine via /proc/<pid>/cmdline and visible in ps."
         ),
     )
     add_common(enroll_parser)
@@ -116,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--token-stdin",
         action="store_true",
         help="Read the token from standard input, e.g. from a password manager.",
+    )
+    token_source.add_argument(
+        "--token-prompt",
+        action="store_true",
+        help=(
+            "Prompt for the token on the terminal without echoing it. "
+            "Used by the employee-facing installer; nothing is written to disk."
+        ),
     )
     enroll_parser.add_argument(
         "--log-level",
@@ -461,6 +478,20 @@ def command_run(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _read_enrollment_token(args: argparse.Namespace) -> str:
+    """Pick the token channel argparse selected.
+
+    Three readers, one of which argparse guarantees was chosen: the group is
+    `required=True` and mutually exclusive. There is no fourth branch that
+    takes a value from `args`, which is the point - see the module docstring.
+    """
+    if args.token_stdin:
+        return read_token_from_stdin()
+    if args.token_prompt:
+        return read_token_from_prompt()
+    return read_token_from_file(args.token_file)
+
+
 def command_enroll(args: argparse.Namespace) -> int:
     """Read the token, enrol, and print what happened.
 
@@ -474,7 +505,7 @@ def command_enroll(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     configure_logging(args.log_level or config.settings.log_level)
 
-    token = read_token_from_stdin() if args.token_stdin else read_token_from_file(args.token_file)
+    token = _read_enrollment_token(args)
 
     result = enroll(config, token=token)
 
@@ -482,7 +513,14 @@ def command_enroll(args: argparse.Namespace) -> int:
     # lines. Note what is absent: the token, the certificate and any
     # fingerprint. A device id is not a secret and is what an operator needs to
     # find the laptop in the dashboard.
-    print(f"enrolled as device {result.device_id}")
+    #
+    # The hostname is included because the employee-facing installer shows this
+    # block as its enrollment confirmation, and "which of these laptops am I"
+    # is the first thing they will be asked when they contact an administrator.
+    print("UbuntuGuard has been successfully installed and enrolled.")
+    print()
+    print(f"  hostname             {detect_adapter().host_facts().hostname}")
+    print(f"  enrollment status    enrolled as device {result.device_id}")
     print(f"  certificate expires  {result.certificate.not_after.isoformat()}")
     print(f"  renewal due          {result.certificate.renew_after.isoformat()}")
     print(f"  policy keys pinned   {len(result.policy_public_keys)}")

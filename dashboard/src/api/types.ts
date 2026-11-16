@@ -64,6 +64,15 @@ export interface MeResponse {
   role: string;
   /** Capabilities the role holds. Cosmetic: the server checks every call. */
   capabilities: string[];
+  /**
+   * True when an administrator reset this account's password.
+   *
+   * Also cosmetic. The server already refuses every capability-guarded route
+   * with `password_change_required` while this is set, so this field is how the
+   * UI learns to show the change-password screen rather than what stops the
+   * user doing anything.
+   */
+  must_change_password: boolean;
 }
 
 /** The four roles the server accepts. Mirrors `Role` in security/rbac.py. */
@@ -74,6 +83,8 @@ export interface UserResponse {
   email: string;
   role: string;
   is_active: boolean;
+  /** True when this account owes a password change after an admin reset. */
+  must_change_password: boolean;
   created_at: string;
   /** Null until the account's first successful sign-in. */
   last_login_at: string | null;
@@ -85,6 +96,27 @@ export interface UserResponse {
  * The password is the account's FIRST password, set by the administrator and
  * handed to its owner. The server refuses anything under 12 characters.
  */
+/** Body of `POST /users/{id}:role`. The target comes from the path. */
+export interface ChangeRoleRequest {
+  role: AdminRole;
+}
+
+/**
+ * Body of `POST /users/{id}:reset-password`.
+ *
+ * The administrator supplies the temporary password, so the response carries
+ * no credential at all — the caller already has the value it just sent.
+ */
+export interface ResetPasswordRequest {
+  password: string;
+}
+
+/** Body of `POST /auth/password`. Changing your own password. */
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
 export interface CreateUserRequest {
   email: string;
   password: string;
@@ -209,6 +241,31 @@ export interface ChainVerificationResponse {
   checked: number;
   broken_at_seq: number | null;
   reason: string | null;
+}
+
+/**
+ * Metadata for the employee-facing agent installer. From a PUBLIC endpoint.
+ *
+ * `target_os_versions` and `validated_os_versions` are two different claims and
+ * the enrollment page renders them as two. The first is the releases the agent
+ * is written for; the second is the releases it has actually been run on, and
+ * it is empty. Showing one combined "supported" list would be a compatibility
+ * claim nobody has earned yet.
+ */
+export interface InstallerInfoResponse {
+  agent_version: string;
+  filename: string;
+  /** Recomputed by the server from the file on every request. */
+  sha256: string;
+  size_bytes: number;
+  built_at: string;
+  /** The API URL baked into the installer, so an employee can confirm it. */
+  server_url: string;
+  minimum_python: string;
+  supported_os_id: string;
+  supported_arch: string[];
+  target_os_versions: string[];
+  validated_os_versions: string[];
 }
 
 /** Query parameters for GET /api/v1/devices. */

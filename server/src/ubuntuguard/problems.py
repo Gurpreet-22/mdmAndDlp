@@ -127,6 +127,31 @@ def not_authenticated() -> ProblemError:
     )
 
 
+def password_change_required(audit_detail: str | None = None) -> ProblemError:
+    """Authenticated, capable, but owing a password change.
+
+    403 rather than 401: the credentials are valid and the session is real, so
+    telling the caller to re-authenticate would send them round a loop that
+    cannot terminate. 403 with a distinct `code` is what lets the dashboard
+    route to the change-password screen instead of the login page.
+
+    Unlike `forbidden`, the detail here is specific and the code is actionable.
+    That is deliberate and does not leak anything: the caller already knows
+    which account they are, and the one thing they need to be told is the one
+    thing they can do about it.
+    """
+    return ProblemError(
+        "password_change_required",
+        status=403,
+        title="Password change required",
+        detail=(
+            "An administrator reset this account's password. Set a new password "
+            "before using the rest of the console."
+        ),
+        audit_detail=audit_detail,
+    )
+
+
 def forbidden(audit_detail: str | None = None) -> ProblemError:
     """Authenticated but lacking the capability.
 

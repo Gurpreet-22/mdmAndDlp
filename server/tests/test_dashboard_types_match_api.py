@@ -44,6 +44,9 @@ INTERFACE_TO_SCHEMA = {
     "MeResponse": "MeResponse",
     "UserResponse": "UserResponse",
     "CreateUserRequest": "CreateUserRequest",
+    "ChangeRoleRequest": "ChangeRoleRequest",
+    "ResetPasswordRequest": "ResetPasswordRequest",
+    "ChangePasswordRequest": "ChangePasswordRequest",
     "DeviceSummary": "DeviceSummary",
     "DeviceDetail": "DeviceDetail",
     "DeviceCounts": "DeviceCounts",
@@ -51,6 +54,7 @@ INTERFACE_TO_SCHEMA = {
     "RegisterDeviceResponse": "RegisterDeviceResponse",
     "EnrollmentTokenResponse": "EnrollmentTokenResponse",
     "CreateEnrollmentTokenResponse": "CreateEnrollmentTokenResponse",
+    "InstallerInfoResponse": "InstallerInfoResponse",
     "AuditEntryResponse": "AuditEntryResponse",
     "ChainVerificationResponse": "ChainVerificationResponse",
 }

@@ -14,10 +14,9 @@ const TTL_CHOICES = [
 /**
  * The platforms the server will record, and what each one actually gets.
  *
- * Only Linux has an agent, and at the time of writing it has not been built
- * either. The other two are selectable so an inventory can be honest about what
- * a company owns, and they say plainly that nothing will manage them rather
- * than implying a capability that does not exist.
+ * Only Ubuntu has an agent. The other two are selectable so an inventory can be
+ * honest about what a company owns, and they say plainly that nothing will
+ * manage them rather than implying a capability that does not exist.
  */
 const PLATFORMS: {
   id: DevicePlatform;
@@ -28,7 +27,8 @@ const PLATFORMS: {
   {
     id: "linux",
     label: "Ubuntu",
-    detail: "22.04 and 24.04 LTS. The only platform an agent is planned for.",
+    detail:
+      "The only platform with an agent. Written for 22.04 and 24.04; neither is validated yet.",
     available: true,
   },
   {
@@ -163,6 +163,22 @@ export default function AddDeviceDialog({
             {result.enrollment_token_expires_at && (
               <p className="muted small">Expires {result.enrollment_token_expires_at}</p>
             )}
+            <div style={{ marginTop: "1rem" }}>
+              <a
+                href="/api/v1/installer/download"
+                download="ubuntuguard-agent-installer.sh"
+                className="download-button"
+                style={{
+                  margin: 0,
+                  padding: "0.55rem 1rem",
+                  fontSize: "0.92rem",
+                  textAlign: "center",
+                  display: "inline-block",
+                }}
+              >
+                Download Agent Installer (.sh)
+              </a>
+            </div>
           </div>
         ) : (
           <div className="banner warn">
@@ -174,21 +190,23 @@ export default function AddDeviceDialog({
           </div>
         )}
 
-        <div className="banner warn">
+        <div className="banner">
           <div className="banner-head">
-            <strong>The management agent does not exist yet</strong>
-            <code className="code-chip">phase 2</code>
+            <strong>Send the employee to the enrollment page</strong>
+            <code className="code-chip">/enroll</code>
           </div>
           <p>
-            There is no installable package to put on this laptop today, so this
-            token cannot yet be redeemed by a real machine. The server side of
-            enrollment is complete and tested; the client is not built. Until it
-            is, the only thing that can enroll is{" "}
-            <code>tools/demo_api.py</code>, which exercises the same API.
+            Give them the token above and the link to{" "}
+            <a href="/enroll" target="_blank" rel="noreferrer">
+              /enroll
+            </a>
+            , where they can download the agent installer. They run it, paste the
+            token when asked, and this device moves from awaiting enrollment to
+            enrolled.
           </p>
           <p className="muted small">
-            When the agent lands, installing it will be the step that consumes the
-            token above and moves this device from awaiting enrollment to enrolled.
+            Send the token and the link by company email or chat. The token is not
+            recoverable from this dialog once it is closed.
           </p>
         </div>
       </Modal>

@@ -136,7 +136,7 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 | D8 | Resume-from-sleep and network-return trigger an immediate check-in | **PARTIAL** — `ClockWatch` detects the clock step a suspend/resume produces and reports it; nothing yet reschedules the heartbeat on that signal, and there is no netlink watch |
 | D9 | `agentd` (unprivileged) / `enforcerd` (root) split over a Unix socket with `SO_PEERCRED` | **NOT STARTED** — Phase 7. The socket path is declared in `AgentPaths` so the privilege boundary has an address |
 | D10 | Inventory collection discovered at runtime, nothing hardcoded | **PARTIAL** — the enrollment fingerprint is discovered, never assumed: os-release, kernel, arch, hashed machine-id, hashed physical MACs, heuristic virtualization. `dmi_product_uuid_hash` is `null` in production, deliberately — see the note below. Full `inventory.v1` reporting has no endpoint yet |
-| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — `install.sh` and one hardened systemd unit, asserted by 45 packaging tests. Installing does not enrol, and `enroll` is a separate operator command with no `--token` option. No `.deb`, and the second (root) unit is Phase 7 |
+| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — `install.sh` and one hardened systemd unit, asserted by 45 packaging tests, plus a single-file self-extracting installer for employees (`packaging/build_installer.py` + `installer-template.sh`, 92 tests) served from `/enroll`. `install.sh` still does not enrol; the employee installer performs enrollment as its own separate, reported step with a token the employee types. No `.deb`, and the second (root) unit is Phase 7. See the note below on why a `.deb` is not the artifact for this workflow |
 
 > **Note on D10 and clone detection.** `/sys/class/dmi/id/product_uuid` is mode
 > 0400 root-only, and the agent runs as an unprivileged user with an empty
@@ -146,6 +146,26 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 > same hardware. This is a known weakness of the signal, accepted rather than
 > fixed: collecting it would mean weakening the systemd hardening, which is a
 > worse trade. Reading it is a candidate job for the Phase 7 root enforcer.
+
+> **Note on D11 and why the employee artifact is a script, not a `.deb`.** A
+> `.deb` remains the right long-term packaging and is still open. It is not the
+> right artifact for the employee enrollment workflow, for one specific reason:
+> D11's own constraint is that `postinst` must not enrol, and a `.deb` opened
+> from a browser is handled by GNOME Software, which gives the employee no
+> terminal in which to type a token. They would install successfully and then be
+> stuck exactly where they started. A script can install and then prompt, in one
+> command, which is the workflow that was asked for. The two are not exclusive:
+> a `.deb` for fleet deployment via configuration management and a script for
+> self-service enrollment answer different questions, and the `.deb` would
+> reuse the same `install.sh`.
+>
+> The employee installer ships SHA-256 integrity verification — the embedded
+> agent is checked against a digest in the script's own header before anything
+> is unpacked, and the whole-file digest is published on the enrollment page.
+> **It is not package signing.** A signature needs a release signing key, and
+> the only key this project has is the Ed25519 policy signing key, which must
+> not be reused for a second purpose. A separate release key is a production
+> requirement and is recorded in `agent/SECURITY-FINDINGS.md` item 9.
 
 ### E. USB data-loss prevention — Phase 5, the actual product
 

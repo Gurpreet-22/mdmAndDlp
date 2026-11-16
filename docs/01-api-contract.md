@@ -234,7 +234,14 @@ about the certificate, so a revoked device cannot renew whatever it presents.
 | `POST` | `/api/v1/auth/login` | Argon2id verify → access + refresh. Lockout: 5 failures / 10 min |
 | `POST` | `/api/v1/auth/refresh` | Rotate refresh token (single-use; reuse revokes the family) |
 | `POST` | `/api/v1/auth/logout` | Revoke the refresh family |
-| `GET`  | `/api/v1/auth/me` | Current user + role |
+| `GET`  | `/api/v1/auth/me` | Current user + role + `must_change_password` |
+| `POST` | `/api/v1/auth/password` | Change your own password. Requires the current one; revokes every other session and reissues this one |
+| `GET POST` | `/api/v1/users` | List / create admin accounts |
+| `POST` | `/api/v1/users/{id}:disable` | Deactivate and revoke sessions. Refused for self and for the last active `super_admin` |
+| `POST` | `/api/v1/users/{id}:enable` | Reactivate, clearing any lockout. Keeps the id, role and password |
+| `POST` | `/api/v1/users/{id}:role` | Change a role. Refused for self and for demoting the last active `super_admin`. Revokes the target's sessions |
+| `POST` | `/api/v1/users/{id}:reset-password` | Set a temporary password. Sets `must_change_password`, revokes every session. Returns `204` with no body |
+| `GET`  | `/api/v1/installer` · `/installer/download` | Unauthenticated. Employee agent installer metadata and download |
 | `GET`  | `/api/v1/devices` | List; filters `q` (hostname), `os_version`, `kernel`, `agent_version`, `status`, `online`, `last_seen_before/after` |
 | `GET`  | `/api/v1/devices/{id}` | Detail: inventory, capabilities, applied policies, recent events |
 | `POST` | `/api/v1/devices/{id}:revoke` | Revoke identity (reason required) |
@@ -254,7 +261,50 @@ about the certificate, so a revoked device cannot renew whatever it presents.
 | `POST` | `/api/v1/audit-logs:export` | CSV/JSON export — itself an audited action |
 | `GET`  | `/healthz` · `/readyz` | Unauthenticated liveness / readiness. No build or version detail |
 
-Audited actions (hash-chained): login success/failure, logout, role change, user create/disable, token create/revoke, enrollment success/failure, device revoke, policy create/assign, exception create/revoke, incident status change, export.
+Audited actions (hash-chained): login success/failure, logout, role change, user create/disable/**enable**, **administrator password reset**, **self-service password change (and failure)**, token create/revoke, enrollment success/failure, device revoke, policy create/assign, exception create/revoke, incident status change, export.
+
+### Administrative lockout protection
+
+`manage_users` is the only capability held by a single role, and it is the one
+that can grant every other capability. "At least one active `super_admin`
+exists" is therefore a liveness property of the whole system, not a nicety:
+lose it and nobody can enrol a device, revoke a laptop, or restore an account —
+including the account that would do the restoring.
+
+Three guards, all returning `409` with a distinct `code`:
+
+| Attempt | Code |
+|---|---|
+| Disable the last active `super_admin` | `cannot_disable_last_super_admin` |
+| Demote the last active `super_admin` | `cannot_demote_last_super_admin` |
+| Change your own role | `cannot_change_own_role` |
+| Disable your own account | `cannot_disable_self` |
+
+The count is taken under `SELECT … FOR UPDATE` over every active `super_admin`
+row, ordered by primary key. A plain `COUNT(*)` is **not** sufficient: under
+PostgreSQL's default READ COMMITTED isolation two concurrent requests each see
+the other account as still active, neither sees the other's uncommitted write,
+and both commit. Locking the whole set in a deterministic order serialises them
+and avoids the lock-order inversion that a narrower lock produces.
+
+### Forced password change
+
+`POST /users/{id}:reset-password` sets `users.must_change_password`. While it is
+set, **every capability-guarded route returns `403 password_change_required`**.
+The check lives in the `require_capability` dependency, so it covers all
+eighteen of them without any route opting in.
+
+Exactly three authenticated routes stay reachable, and they are the minimum
+needed to resolve the state: `GET /auth/me` so the client can discover why it
+is being refused, `POST /auth/password` to leave the state, and
+`POST /auth/logout`. `POST /auth/password` is the only thing that clears the
+flag, so the state can be left exactly one way: by proving knowledge of the
+temporary password and choosing a new one.
+
+The capability is checked **before** the forced-change flag, so a role asking
+for something it never held gets `forbidden` rather than
+`password_change_required` — otherwise the state would be an oracle for probing
+the RBAC matrix.
 
 ## 5. RBAC matrix (proposed — needs your sign-off)
 

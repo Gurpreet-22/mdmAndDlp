@@ -6,9 +6,9 @@ wire contract; this module's job is the local half.
 
 The sequence, and why each step is where it is:
 
-  1. Read the token from a file or stdin, and register it with the log
-     redaction registry **before anything can be logged**. Never from argv -
-     see `read_token_from_file`.
+  1. Read the token from a file, from stdin, or from a no-echo terminal
+     prompt, and register it with the log redaction registry **before anything
+     can be logged**. Never from argv - see `read_token_from_file`.
   2. Create the state and pki directories at their required modes.
   3. Generate the keypair and CSR, and **persist both before the first POST**.
      This is the step that makes a retry survivable; `ensure_device_keypair`
@@ -27,6 +27,7 @@ before the response has been verified.
 from __future__ import annotations
 
 import dataclasses
+import getpass
 import json
 import logging
 import stat
@@ -79,6 +80,17 @@ DEFAULT_MAX_ATTEMPTS = 4
 #: is watching this command run.
 RETRY_INITIAL_SECONDS = 2.0
 RETRY_MAX_SECONDS = 20.0
+
+#: What `--token-prompt` asks. Fixed here rather than in the installer so the
+#: employee sees the same words however enrollment was started, and so a test
+#: can assert the prompt names what is wanted and where it comes from.
+#:
+#: Named `ENROLLMENT_PROMPT` rather than the obvious `TOKEN_PROMPT` because
+#: ruff's S105 flags any string literal assigned to a name containing "token"
+#: as a possible hardcoded credential. The rule is right to be blunt about it,
+#: and renaming is a better answer here than a `noqa` that future readers would
+#: have to evaluate.
+ENROLLMENT_PROMPT = "Enter your UbuntuGuard enrollment token: "
 
 
 @dataclasses.dataclass(frozen=True)
@@ -193,6 +205,58 @@ def read_token_from_stdin(stream: Any = None) -> str:
     except OSError as exc:
         raise EnrollmentError(f"could not read the token from stdin: {exc}") from exc
     if not isinstance(raw, str):  # pragma: no cover - stdin is text mode
+        raw = str(raw)
+    return _accept_token(raw)
+
+
+def read_token_from_prompt(prompt_fn: Any = None) -> str:
+    """Prompt a person for the token, without echoing it.
+
+    The channel the employee-facing installer uses, and the only one of the
+    three that never puts the token anywhere but this process's memory.
+
+    **Why this is not just a convenience over `--token-file`.** The obvious way
+    to make the installer interactive is to read the token in shell and write it
+    to a 0600 file for `--token-file` to pick up. That was rejected: it puts a
+    live single-use credential on a filesystem, and the usual cleanup - `shred
+    -u` - does not reliably erase anything on the overlayfs and tmpfs mounts a
+    laptop actually has. `getpass` hands the value straight to this function, so
+    there is no file to erase and no window in which one exists.
+
+    `getpass.getpass` reads from `/dev/tty` rather than stdin where it can, so a
+    piped stdin does not silently defeat the no-echo. Where it cannot - no
+    controlling terminal, which is what happens under a CI runner or a systemd
+    unit - it falls back to stdin and warns on stderr. That fallback would mean
+    the token is echoed, so it is refused here instead: an employee's token
+    appearing on their screen and in their terminal's scrollback is exactly the
+    leak this function exists to prevent.
+
+    Registration with `SECRETS` happens in `_accept_token`, as it does for the
+    other two readers, so the ordering guarantee is identical.
+    """
+    if prompt_fn is None:
+        if not sys.stdin.isatty():
+            raise EnrollmentError(
+                "--token-prompt needs a terminal to read from, and this process has "
+                "none. The token would be echoed to the screen and left in the "
+                "terminal's scrollback.\n"
+                "  Run the installer directly in a terminal, or for an unattended "
+                "install pipe the token in:\n"
+                "    printf '%s' '<token>' | ubuntuguard-agent enroll --token-stdin"
+            )
+        prompt_fn = getpass.getpass
+
+    try:
+        raw = prompt_fn(ENROLLMENT_PROMPT)
+    except (EOFError, KeyboardInterrupt) as exc:
+        # Ctrl-D or Ctrl-C at the prompt. Reported as a refusal rather than a
+        # traceback: the employee did not type anything, so there is nothing
+        # wrong beyond their having changed their mind.
+        raise EnrollmentError("no enrollment token was entered") from exc
+    except OSError as exc:
+        raise EnrollmentError(f"could not read the token from the terminal: {exc}") from exc
+
+    if not isinstance(raw, str):  # pragma: no cover - getpass returns str
         raw = str(raw)
     return _accept_token(raw)
 

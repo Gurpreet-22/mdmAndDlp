@@ -125,14 +125,36 @@ def test_enroll_has_no_option_that_takes_a_token_on_the_command_line() -> None:
     }
     assert "--token" not in option_strings
     assert "-t" not in option_strings
-    # The two safe channels are both present, so this test cannot pass by the
+    # The three safe channels are all present, so this test cannot pass by the
     # enroll command having no token input at all.
     assert "--token-file" in option_strings
     assert "--token-stdin" in option_strings
+    assert "--token-prompt" in option_strings
 
-    # Every option that mentions a token must be one of the two safe ones.
+    # Every option that mentions a token must be one of the three safe ones.
+    # An allowlist rather than a pattern, so adding a fourth channel is a
+    # deliberate edit to this line and not something a reviewer can miss.
     token_options = {option for option in option_strings if "token" in option}
-    assert token_options == {"--token-file", "--token-stdin"}
+    assert token_options == {"--token-file", "--token-stdin", "--token-prompt"}
+
+    # The property the allowlist above is a proxy for, asserted directly: no
+    # option that mentions a token may consume a VALUE from the command line.
+    #
+    # `--token-file` takes a path, which is not the credential and is safe in
+    # argv. `--token-stdin` and `--token-prompt` take nothing at all. What must
+    # never exist is an option whose argument IS the token, so this checks the
+    # one case that distinguishes them - a path is a path, and anything else
+    # that wants a value is the mistake.
+    for action in enroll_parser._actions:  # noqa: SLF001 - as above
+        if not any("token" in option for option in action.option_strings):
+            continue
+        if action.option_strings == ["--token-file"]:
+            continue
+        assert action.nargs == 0, (
+            f"{action.option_strings} consumes a command-line value. If that value "
+            "is the enrollment token, /proc/<pid>/cmdline has published it to every "
+            "user on this machine."
+        )
 
 
 def test_enroll_requires_a_token_source() -> None:

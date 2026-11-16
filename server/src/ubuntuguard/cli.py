@@ -247,9 +247,43 @@ def cmd_set_password(args: argparse.Namespace) -> int:
     address, leaving the original orphaned in the audit trail as an actor
     nobody can sign in as.
 
-    Operator-only, and deliberately not an HTTP route. A password-reset
-    endpoint is an account-takeover primitive; adding one permanently to solve
-    a one-off migration would be a bad trade.
+    **There is now an HTTP route for this, and this command is no longer the
+    only way.** `POST /api/v1/users/{id}:reset-password` lets a `super_admin`
+    set a temporary password on another account from the dashboard. This
+    docstring previously said a password-reset endpoint was "an
+    account-takeover primitive; adding one permanently to solve a one-off
+    migration would be a bad trade", and that reasoning is kept here rather
+    than deleted, because the trade was reconsidered rather than disproved.
+
+    What changed the answer: `manage_users` is held by `super_admin` alone, and
+    a `super_admin` can already create accounts and disable anybody. It is
+    already total authority over the admin plane, so the route does not widen
+    what that role can do in any meaningful sense. What it genuinely adds is
+    the ability for one `super_admin` to take over ANOTHER `super_admin`'s
+    identity without shell access on the server, and that is a real widening.
+    Three controls bound it, all of which the route applies: an audit row
+    naming actor and target, `must_change_password` so the temporary credential
+    buys nothing but its own replacement, and revocation of every session the
+    target holds so the reset is immediately visible to them.
+    See `agent/SECURITY-FINDINGS.md` item 11.
+
+    **When to use this command instead of the route.** Two cases, both of which
+    the route cannot serve:
+
+      - No `super_admin` can sign in. Every password forgotten, or the last one
+        locked out. The route needs an authenticated `super_admin`; this does
+        not, because it needs the database password and shell access instead.
+      - An account created by the retired no-authentication placeholder, which
+        holds an UNUSABLE hash - Argon2id over 32 random bytes that were
+        discarded - so no password can ever verify against it. Without this
+        command the only route back in is a second account under a different
+        address, leaving the original orphaned in the audit trail as an actor
+        nobody can sign in as.
+
+    Unlike the HTTP route, this does **not** set `must_change_password`. An
+    operator with shell access recovering their own locked-out account should
+    not then be forced through a change screen; and in the placeholder case
+    there is nobody else to hand a temporary credential to.
     """
     settings = Settings()
     factory = create_session_factory(create_db_engine(settings))

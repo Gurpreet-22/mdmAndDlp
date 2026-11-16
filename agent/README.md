@@ -165,7 +165,57 @@ Setting it forces `release_build` to false, which is reported to the server and
 flagged in the dashboard — a development box shows up as one rather than passing
 for a managed laptop.
 
-## Installing on a host
+## Installing on an employee laptop
+
+This is the path employees take, and it is one command plus one paste. The
+installer is built once per deployment by an administrator and served from the
+UbuntuGuard server's `/enroll` page.
+
+```bash
+# Build it (administrator, once). Writes server/var/installer/.
+make installer SERVER_URL=https://mdm.company.com \
+    ADMIN_CONTACT=it-help@company.com
+#   SERVER_CA=/etc/ssl/ubuntuguard/internal-ca.crt   if the server uses an internal CA
+```
+
+```bash
+# Run it (employee). Downloaded from https://mdm.company.com/enroll
+cd ~/Downloads && ./ubuntuguard-agent-installer.sh
+```
+
+It detects the OS and architecture and refuses anything that is not Ubuntu,
+names the apt package for each missing dependency, escalates with sudo only
+after those checks pass, verifies the embedded agent against a digest **before**
+unpacking it, runs `install.sh`, writes `agent.yaml` and the server CA, prompts
+for the token without echoing it, enrols, starts the service, and reports what
+it could actually confirm.
+
+Three details in it are decisions rather than mechanics:
+
+**Enrollment runs as `ubuntuguard`, not as root.** `identity.py` never chowns —
+it writes the private key at 0600 owned by whoever is running — and the unit is
+`User=ubuntuguard`. Enrolling as root therefore leaves a root-owned `device.key`
+in the service account's own pki directory, and the agent cannot read the one
+file its identity rests on. The installer pipes the token to
+`runuser -u ubuntuguard`, which fixes that and is least privilege besides:
+enrollment writes one directory and makes one HTTPS request.
+
+**The token is read by the privileged process and piped, not prompted for by the
+agent.** `--token-prompt` exists and is tidier, but a process that has dropped
+privilege may not be able to reopen the controlling terminal — the pty is mode
+0600 and owned by the employee — and `getpass` would then fall back to reading
+stdin *with echo*. The agent refuses that fallback rather than leaking, which
+would leave the installer dead at its last step. So the root process reads the
+terminal and writes to a pipe. Nothing is ever written to disk, which also means
+there is nothing to `shred` — and `shred` does not reliably erase anything on the
+overlayfs and tmpfs mounts a laptop actually has.
+
+**`install.sh` still does not enrol.** That is feature D11 and it is unchanged:
+the employee installer calls `install.sh` for the install and then performs
+enrollment as its own deliberate, separately-reported step. The packaging tests
+that assert `install.sh` never enrols are untouched and still pass.
+
+### Installing by hand
 
 ```bash
 sudo ./packaging/install.sh          # add --dry-run to see every action first
@@ -173,28 +223,33 @@ sudo vi /etc/ubuntuguard/agent.yaml  # server_url and server_ca_bundle
 /opt/ubuntuguard/venv/bin/ubuntuguard-agent selftest
 
 # Enrol. The token comes from the dashboard and is single use.
-sudo install -m 0600 /dev/null /run/ubuntuguard-token
-sudo sh -c "printf '%s' '<token>' > /run/ubuntuguard-token"
-sudo /opt/ubuntuguard/venv/bin/ubuntuguard-agent enroll \
-    --token-file /run/ubuntuguard-token
-sudo shred -u /run/ubuntuguard-token
+sudo -u ubuntuguard /opt/ubuntuguard/venv/bin/ubuntuguard-agent enroll --token-prompt
 
 sudo systemctl start ubuntuguard-agent
 journalctl -u ubuntuguard-agent -f
 ```
+
+Note the `sudo -u ubuntuguard`: enrolling as root is what produces the
+unreadable-key problem described above.
 
 **There is no `--token` option, and that is the control rather than an
 oversight.** `/proc/<pid>/cmdline` is world-readable on Linux, so a token
 passed as an argument is published to every user on the machine and visible to
 anything sampling `ps`. An option that accepted one and warned would be worse
 than none: by the time the warning printed, the value would already be exposed.
-`tests/test_cli_and_service.py` asserts the option does not exist, because the
-mistake is an easy and well-meaning one.
+`tests/test_cli_and_service.py` asserts the option does not exist, and asserts
+separately that no token-bearing option consumes a command-line value.
 
-To avoid the disk entirely, pipe it in:
+The three channels that do exist, and when each is right:
+
+| Channel | For |
+|---|---|
+| `--token-prompt` | A person at a terminal. Not echoed, never written to disk |
+| `--token-stdin` | A pipe: the employee installer, or a password manager |
+| `--token-file` | A 0600 file. Refused if group or others can read it |
 
 ```bash
-pass show ubuntuguard/token | sudo -E \
+pass show ubuntuguard/token | sudo -u ubuntuguard \
     /opt/ubuntuguard/venv/bin/ubuntuguard-agent enroll --token-stdin
 ```
 

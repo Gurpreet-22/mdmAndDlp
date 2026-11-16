@@ -68,6 +68,16 @@ export default function EnrollmentTokensPage() {
             within 24 hours.
           </p>
         </div>
+        <div>
+          <a
+            href="/api/v1/installer/download"
+            download="ubuntuguard-agent-installer.sh"
+            className="download-button"
+            style={{ margin: 0, padding: "0.55rem 1.1rem", fontSize: "0.95rem" }}
+          >
+            Download Agent Installer (.sh)
+          </a>
+        </div>
       </div>
 
       <ErrorBanner error={error} />

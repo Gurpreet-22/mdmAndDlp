@@ -90,6 +90,18 @@ server {
         include /etc/nginx/ubuntuguard/client-cert-headers.conf;
         proxy_pass http://ubuntuguard_api;
     }
+
+    # The employee agent installer: GET /api/v1/installer and
+    # /api/v1/installer/download. Public, because an enrolling employee has no
+    # credential, and safe to be because the artifact carries no private key,
+    # no certificate and no enrollment token. Rate-limited for bandwidth.
+    location ^~ /api/v1/installer {
+        limit_req zone=ug_installer burst=20 nodelay;
+        include /etc/nginx/ubuntuguard/client-cert-headers.conf;
+        proxy_pass http://ubuntuguard_api;
+        proxy_read_timeout 60s;
+    }
+
     # Not served here.
     location ^~ /api/v1/devices/me/ { return 421; }
 
@@ -114,6 +126,7 @@ server {
     ssl_verify_depth       1;
 
     location = /api/v1/enroll { return 421; }
+    location ^~ /api/v1/installer { return 404; }
 
     location ^~ /api/v1/devices/me/ {
         include /etc/nginx/ubuntuguard/client-cert-headers.conf;
@@ -121,6 +134,15 @@ server {
     }
     location / { return 404; }
 }
+```
+
+The `limit_req_zone` directives belong at `http{}` level, alongside the two the
+development configuration declares:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=ug_enroll:10m    rate=10r/m;
+limit_req_zone $binary_remote_addr zone=ug_login:10m     rate=30r/m;
+limit_req_zone $binary_remote_addr zone=ug_installer:10m rate=60r/m;
 ```
 
 Two details that are easy to miss with SNI-based splitting:

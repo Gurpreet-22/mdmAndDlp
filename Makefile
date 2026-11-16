@@ -44,7 +44,7 @@ server-venv: ## Create the server venv and install it editable with dev extras
 	cd $(SERVER) && $(UV) pip install --python .venv/bin/python -e ".[dev]"
 
 .PHONY: setup
-setup: tools server-venv ## Everything needed to run the test suites
+setup: tools server-venv agent-venv ## Everything needed to run the test suites
 
 # --------------------------------------------------------------------------- #
 # Database
@@ -162,13 +162,14 @@ db-test-destructive: ## Migration up/down tests. DROPS EVERY TABLE, then repairs
 	@echo "Now re-create an admin: cd server && .venv/bin/python -m ubuntuguard.cli create-admin --email <your-email> --role <role>"
 
 .PHONY: lint
-lint: ## ruff check, ruff format --check and mypy --strict
+lint: ## ruff check, ruff format --check and mypy --strict (server and agent)
 	cd $(SERVER) && .venv/bin/ruff check . \
 	  && .venv/bin/ruff format --check . \
 	  && .venv/bin/mypy
+	$(MAKE) agent-lint
 
 .PHONY: test
-test: verify server-test ## Every check that currently exists
+test: verify server-test agent-test ## Every check that currently exists
 
 .PHONY: vectors
 vectors: ## Regenerate testdata/policy_vectors.json after an envelope change
@@ -183,7 +184,41 @@ spike-env: ## Read-only USBGuard environment survey (no changes)
 	cd spike/usbguard && ./spike.sh env
 
 # --------------------------------------------------------------------------- #
-# Not yet implemented
+# Agent
 # --------------------------------------------------------------------------- #
-.PHONY: agent
-agent: ; @echo "Phase 2: Go agentd + enforcerd.";        exit 1
+PY_AGENT  := agent/.venv/bin/python
+
+.PHONY: agent-venv
+agent-venv: ## Create the agent venv (CPython 3.10, the floor for 22.04)
+	$(UV) venv --python 3.10 agent/.venv
+	cd agent && $(UV) pip install --python .venv/bin/python -e ".[dev]"
+
+.PHONY: agent-test
+agent-test: ## Run the agent suite (no server, no database, no root)
+	@test -x $(PY_AGENT) || { echo "run 'make agent-venv' first"; exit 1; }
+	cd agent && .venv/bin/python -m pytest
+
+.PHONY: agent-lint
+agent-lint: ## ruff check, ruff format --check and mypy --strict for the agent
+	cd agent && .venv/bin/ruff check src tests \
+	  && .venv/bin/ruff format --check src tests \
+	  && .venv/bin/mypy
+
+.PHONY: lan
+lan: ## Configure server IP & rebuild installer so other laptops can connect
+	./tools/setup_lan.sh
+
+.PHONY: installer
+installer: ## Build the employee installer. SERVER_URL=... [SERVER_CA=...] [ADMIN_CONTACT=...]
+	@test -n "$(SERVER_URL)" || { \
+	  echo "usage: make installer SERVER_URL=https://mdm.company.com \\"; \
+	  echo "         [SERVER_CA=/path/to/internal-ca.crt] [ADMIN_CONTACT=it-help@company.com]"; \
+	  echo ""; \
+	  echo "Writes the installer, its .sha256 and installer-manifest.json into"; \
+	  echo "server/var/installer, which is what UBUNTUGUARD_INSTALLER_DIR should name."; \
+	  exit 1; }
+	python3 agent/packaging/build_installer.py \
+	  --server-url '$(SERVER_URL)' \
+	  $(if $(SERVER_CA),--server-ca '$(SERVER_CA)',) \
+	  $(if $(ADMIN_CONTACT),--admin-contact '$(ADMIN_CONTACT)',) \
+	  --output-dir server/var/installer

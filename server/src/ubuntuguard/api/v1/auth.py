@@ -9,6 +9,7 @@ requests - which is also why it lives only 15 minutes.
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
@@ -17,7 +18,13 @@ from ubuntuguard import problems
 from ubuntuguard.api.deps import Principal, get_principal, get_session
 from ubuntuguard.config import Settings
 from ubuntuguard.constants import REFRESH_TOKEN_TTL_SECONDS
-from ubuntuguard.schemas import AuthModeResponse, LoginRequest, MeResponse, TokenResponse
+from ubuntuguard.schemas import (
+    AuthModeResponse,
+    ChangePasswordRequest,
+    LoginRequest,
+    MeResponse,
+    TokenResponse,
+)
 from ubuntuguard.security.rbac import capabilities_for
 from ubuntuguard.services import auth
 
@@ -159,10 +166,54 @@ def me(principal: Principal = Depends(get_principal)) -> MeResponse:
 
     The dashboard uses the capability list to hide controls. The server still
     checks every call, because a hidden button is not a security boundary.
+
+    Depends on `get_principal`, NOT `require_capability`, and that is what
+    keeps it reachable for an account owing a password change. It is the one
+    route that must answer in that state: without it the dashboard cannot tell
+    the difference between "your password must change" and "your session is
+    gone", and would send the user to the login page in a loop.
     """
     return MeResponse(
         user_id=principal.user_id,  # type: ignore[arg-type]
         email=principal.email,
         role=principal.role.value,
         capabilities=sorted(capability.value for capability in capabilities_for(principal.role)),
+        must_change_password=principal.must_change_password,
     )
+
+
+@router.post("/password", response_model=TokenResponse)
+def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> TokenResponse:
+    """Change your own password.
+
+    Deliberately on `get_principal` rather than a capability: every role must
+    be able to change their own password, and an account owing a forced change
+    has to be able to reach exactly this route and nothing else. A capability
+    dependency would make it unreachable in the state it exists to resolve.
+
+    Requires the current password. An access token is not sufficient authority
+    to replace a credential - if it were, a stolen token would be a permanent
+    account takeover rather than a fifteen-minute one.
+
+    Returns a new token pair and sets a new refresh cookie. Every previous
+    session is revoked, including the one that made this request, and then one
+    fresh session is issued in its place. The alternative - revoke and stop -
+    would sign the user out of the tab they are using, which for a forced
+    change means they could never get past the screen telling them to change
+    it.
+    """
+    result = auth.change_own_password(
+        session,
+        user_id=uuid.UUID(principal.user_id),
+        current_password=body.current_password,
+        new_password=body.new_password,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    _set_refresh_cookie(response, request.app.state.settings, result.refresh.plaintext)
+    return TokenResponse(access_token=result.access.plaintext, expires_in=result.access_expires_in)

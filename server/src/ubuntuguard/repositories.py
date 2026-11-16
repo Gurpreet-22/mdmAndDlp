@@ -169,6 +169,113 @@ def disable_user(session: Session, user: User) -> int:
     return revoke_all_sessions(session, user)
 
 
+def enable_user(session: Session, user: User) -> None:
+    """Reactivate a disabled account, and clear any standing lockout.
+
+    `locked_until` is cleared deliberately. An account can be both locked (five
+    failed passwords) and disabled, and in that order: somebody fails to sign
+    in, an administrator disables the account while investigating, and then
+    re-enables it. Restoring only `is_active` would hand back an account that
+    still refuses the correct password until the lockout expires, with no route
+    to clear it - `set_user_lock` is not reachable from any HTTP route, and
+    `touch_last_login` only clears it on a *successful* login, which is exactly
+    what the lock is preventing. So re-enabling clears it and the user can sign
+    in again with their existing password.
+
+    No session work: `disable_user` already revoked everything this account
+    held, and enabling must not mint anything. The user signs in again.
+
+    The password is untouched, so account history - the address, the role, the
+    audit trail pointing at this id - survives intact. That is the difference
+    between this and deleting and recreating the account.
+    """
+    user.is_active = True
+    user.locked_until = None
+    user.updated_at = dt.datetime.now(dt.UTC)
+    session.flush()
+
+
+def set_user_role(session: Session, user: User, role: str) -> None:
+    """Change a role. The caller is responsible for the last-super_admin guard.
+
+    Deliberately dumb: the guard lives in `services/users.py`, where it can
+    take the lock in the same transaction as the write. A check inside this
+    function would be a check without a lock, which is the race in F4.
+    """
+    user.role = role
+    user.updated_at = dt.datetime.now(dt.UTC)
+    session.flush()
+
+
+def set_must_change_password(session: Session, user: User, value: bool) -> None:
+    user.must_change_password = value
+    user.updated_at = dt.datetime.now(dt.UTC)
+    session.flush()
+
+
+def lock_active_super_admins(session: Session, *, exclude_user_id: uuid.UUID) -> int:
+    """Count the OTHER active super_admins, holding a row lock on each.
+
+    This is the last-super_admin protection, and the lock is the whole point of
+    it. A plain `COUNT(*)` is not sufficient and the reason is specific:
+    PostgreSQL defaults to READ COMMITTED, so two concurrent transactions each
+    disabling a different super_admin both count the other as still active,
+    neither sees the other's uncommitted write, and both commit. Two admins
+    become zero, and because `enable_user` is itself guarded by
+    `manage_users` - which nobody now holds - that state is unrecoverable
+    without database access.
+
+    `with_for_update()` closes it. The first transaction to reach here takes a
+    row lock on every other active super_admin; the second blocks on that lock
+    until the first commits, and only then takes its count - which now reflects
+    the committed change and refuses the operation.
+
+    **Every active super_admin is locked, including the target, and the ORDER
+    BY is not cosmetic.** Both details were added after a concurrency test
+    deadlocked, and the mechanism is worth stating because it is easy to
+    reintroduce.
+
+    The first attempt locked only the OTHER super_admins - `id != exclude` -
+    which seemed tidier and is wrong. With two super_admins A and B and two
+    transactions disabling one each: T1 locks B, T2 locks A, then T1 tries to
+    UPDATE A and T2 tries to UPDATE B. Each holds what the other needs.
+    PostgreSQL detects the cycle and aborts one with `deadlock detected`, so no
+    lockout occurs - the data stays safe - but the caller gets an unhandled
+    `OperationalError` and the client a 500, where it should have had a clean
+    409 explaining that the last super_admin cannot be removed.
+
+    Locking the whole set in primary-key order removes the cycle: both
+    transactions want the same rows in the same sequence, so the second simply
+    waits for the first to commit and then sees the committed state and
+    refuses. The target is in that set whenever the guard applies, because
+    `_refuse_last_super_admin` only calls this for an account that is currently
+    an active super_admin - so the row about to be written is locked up front
+    rather than acquired later, which is the other half of why the cycle is
+    gone.
+
+    The exclusion therefore happens in Python, on the locked set, rather than
+    in the WHERE clause. `exclude_user_id` still means "do not count the
+    account being acted on": the caller is asking how many super_admins would
+    remain if this one were removed, and zero means refuse.
+
+    `select(User.id)` rather than whole entities: the rows are wanted for the
+    lock and the count, never for their attributes.
+    """
+    locked = (
+        session.execute(
+            select(User.id)
+            .where(User.role == "super_admin", User.is_active)
+            # Deterministic lock acquisition order. Without it two callers can
+            # take the same rows in different orders and deadlock.
+            .order_by(User.id)
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    return sum(1 for user_id in locked if user_id != exclude_user_id)
+
+
 def record_login_attempt(
     session: Session,
     *,

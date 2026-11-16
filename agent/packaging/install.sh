@@ -17,6 +17,7 @@
 #   sudo ./install.sh                 # install from the directory above this one
 #   sudo ./install.sh --source /path  # install from a specific source tree
 #        ./install.sh --dry-run       # print every action, change nothing
+#        ./install.sh --no-instructions  # omit the closing "next steps" text
 #
 set -euo pipefail
 
@@ -33,6 +34,13 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DRY_RUN=0
 DO_ENABLE=1
+SHOW_INSTRUCTIONS=1
+
+# os-release IDs this installer will proceed on, and the architectures the
+# agent has been written for. Reported by the OS rather than assumed; the agent
+# makes the same distinction in `osadapter/ubuntu.py`.
+SUPPORTED_OS_ID="ubuntu"
+SUPPORTED_ARCH="x86_64 aarch64"
 
 usage() {
     sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed 's/^# \?//;$d'
@@ -58,6 +66,10 @@ while [[ $# -gt 0 ]]; do
         --source)   SOURCE_DIR="$(cd -- "$2" && pwd)"; shift 2 ;;
         --dry-run)  DRY_RUN=1; shift ;;
         --no-enable) DO_ENABLE=0; shift ;;
+        # Set by the employee-facing installer, which prints its own
+        # confirmation block. The closing text below tells an operator to edit
+        # agent.yaml and enrol by hand, which that installer has already done.
+        --no-instructions) SHOW_INSTRUCTIONS=0; shift ;;
         -h|--help)  usage ;;
         *)          die "unknown option: $1 (try --help)" ;;
     esac
@@ -71,6 +83,38 @@ fi
 
 [[ -f "${SOURCE_DIR}/pyproject.toml" ]] \
     || die "no pyproject.toml in ${SOURCE_DIR}; pass --source <agent directory>"
+
+# The operating system and architecture, read rather than assumed. This is a
+# refusal and not a warning: there is one OS adapter, it reads Ubuntu's
+# interfaces, and installing on anything else would produce a service that runs
+# and reports nothing useful.
+#
+# Parsed rather than sourced - `. /etc/os-release` executes the file, and
+# reading it as data costs one sed.
+HOST_OS_ID=""
+HOST_OS_VERSION=""
+for candidate in /etc/os-release /usr/lib/os-release; do
+    if [[ -r "${candidate}" ]]; then
+        HOST_OS_ID="$(sed -n 's/^ID=//p' "${candidate}" | head -1 | tr -d '"')"
+        HOST_OS_VERSION="$(sed -n 's/^VERSION_ID=//p' "${candidate}" | head -1 | tr -d '"')"
+        [[ -n "${HOST_OS_ID}" ]] && break
+    fi
+done
+
+[[ -n "${HOST_OS_ID}" ]] \
+    || die "could not read an ID from /etc/os-release, so this host's operating system is unknown"
+
+if [[ "${HOST_OS_ID}" != "${SUPPORTED_OS_ID}" ]]; then
+    die "this host reports os-release ID '${HOST_OS_ID}'; the agent supports ${SUPPORTED_OS_ID} only"
+fi
+
+HOST_ARCH="$(uname -m)"
+arch_ok=0
+for candidate in ${SUPPORTED_ARCH}; do
+    [[ "${HOST_ARCH}" == "${candidate}" ]] && arch_ok=1
+done
+[[ "${arch_ok}" -eq 1 ]] \
+    || die "architecture '${HOST_ARCH}' is not one the agent targets (${SUPPORTED_ARCH})"
 
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 
@@ -87,11 +131,32 @@ if ! python3 -c 'import venv' >/dev/null 2>&1; then
     die "the python3 venv module is missing. Install it with: apt-get install python3-venv"
 fi
 
+# ensurepip is the check that actually matters, and `import venv` does not
+# imply it. Debian and Ubuntu split ensurepip out of the standard library into
+# python3-venv, so on a machine without that package `import venv` succeeds
+# while `python3 -m venv` fails partway through with "You may need to use sudo
+# with that command" - having already created a directory. Verified on the
+# development host, where venv imports and ensurepip does not.
+#
+# Reported rather than fatal under --dry-run: a dry run should show the whole
+# plan, and this is the one preflight item a developer's machine routinely
+# fails while still being able to review what the script would do.
+if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+        warn "the python3 ensurepip module is missing, so '${VENV_DIR}' could not get pip."
+        warn "Install it with: apt-get install python3-venv. A real install would stop here."
+    else
+        die "the python3 ensurepip module is missing, so the virtualenv cannot get pip.
+     Install it with: apt-get install python3-venv"
+    fi
+fi
+
 if ! command -v systemctl >/dev/null 2>&1; then
     die "systemctl not found; this installer targets systemd hosts"
 fi
 
 log "source       ${SOURCE_DIR}"
+log "host         ${HOST_OS_ID} ${HOST_OS_VERSION}  ${HOST_ARCH}"
 log "python       $(python3 --version 2>&1)"
 log "virtualenv   ${VENV_DIR}"
 
@@ -183,6 +248,11 @@ if [[ "${DO_ENABLE}" -eq 1 ]]; then
     run systemctl enable "${SERVICE_NAME}.service"
 else
     log "skipping enable (--no-enable)"
+fi
+
+if [[ "${SHOW_INSTRUCTIONS}" -eq 0 ]]; then
+    log "done (closing instructions omitted at the caller's request)"
+    exit 0
 fi
 
 cat <<EOF
