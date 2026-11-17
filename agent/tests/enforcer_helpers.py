@@ -76,6 +76,7 @@ def usb_control_examples(category: str) -> list[Path]:
         if path.name.startswith(prefix)
     )
 
+
 DAEMON_CONF = """\
 # usbguard daemon configuration
 RuleFile=/etc/usbguard/rules.conf
@@ -182,9 +183,7 @@ class FakeHost:
             if cmd[1:] == ["--version"]:
                 return 0, "usbguard 1.1.4 compiled with:\n  audit: enabled"
             if cmd[1:] == ["list-rules"]:
-                return 0, "\n".join(
-                    f"{index}: {rule}" for index, rule in enumerate(self.loaded)
-                )
+                return 0, "\n".join(f"{index}: {rule}" for index, rule in enumerate(self.loaded))
             if cmd[1:] == ["list-devices"]:
                 return 0, LIST_DEVICES
             return 1, "unknown usbguard subcommand"
@@ -220,9 +219,7 @@ class FakeHost:
                     self.loaded = list(self.loads_instead)
                 else:
                     # What a real daemon does: load the file it was given.
-                    self.loaded = effective(
-                        Path(self.rules_path).read_text(encoding="utf-8")
-                    )
+                    self.loaded = effective(Path(self.rules_path).read_text(encoding="utf-8"))
                 self.loaded += self.appends_after
                 return 0, ""
             return 1, f"unknown systemctl action {action}"
@@ -251,12 +248,8 @@ class EnforcerFixture(unittest.TestCase):
             runner=self.host.runner,
             which=self.host.which,
         )
-        self.store = snapshots.SnapshotStore(
-            directory=str(root / "snapshots"), retention=5
-        )
-        self.enforcer = ops.Enforcer(
-            system=self.system, store=self.store, clock=lambda: NOW
-        )
+        self.store = snapshots.SnapshotStore(directory=str(root / "snapshots"), retention=5)
+        self.enforcer = ops.Enforcer(system=self.system, store=self.store, clock=lambda: NOW)
 
     def set_policy(self, payload=None, **kwargs):
         return self.enforcer.handle(

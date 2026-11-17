@@ -35,6 +35,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_STORE = "/var/lib/ubuntuguard/enforcer/snapshots"
 
@@ -65,11 +66,11 @@ class Snapshot:
     snapshot_id: str
     taken_at: str
     rules_text: str
-    daemon_params: dict
+    daemon_params: dict[str, Any]
     rules_fingerprint: str | None
     note: str = ""
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,
             "taken_at": self.taken_at,
@@ -79,7 +80,7 @@ class Snapshot:
             "note": self.note,
         }
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         """Metadata without the rules body, for inclusion in a response.
 
         The rules themselves are not echoed back over the socket. Nothing
@@ -127,9 +128,7 @@ class SnapshotStore:
         root = Path(self.directory).resolve()
         candidate = (root / f"{snapshot_id}.json").resolve()
         if candidate.parent != root:
-            raise SnapshotError(
-                "invalid_snapshot_id", "snapshot_id resolved outside the store"
-            )
+            raise SnapshotError("invalid_snapshot_id", "snapshot_id resolved outside the store")
         return candidate
 
     # -- writing -----------------------------------------------------------
@@ -149,7 +148,7 @@ class SnapshotStore:
         self,
         *,
         rules_text: str,
-        daemon_params: dict,
+        daemon_params: dict[str, Any],
         rules_fingerprint: str | None,
         note: str = "",
         now: dt.datetime | None = None,
@@ -163,9 +162,7 @@ class SnapshotStore:
         snapshot_id = f"{_utc_stamp(now)}-{os.urandom(4).hex()}"
         snapshot = Snapshot(
             snapshot_id=snapshot_id,
-            taken_at=now.astimezone(dt.timezone.utc)
-            .replace(microsecond=0)
-            .isoformat(),
+            taken_at=now.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat(),
             rules_text=rules_text,
             daemon_params=dict(daemon_params),
             rules_fingerprint=rules_fingerprint,
@@ -181,9 +178,7 @@ class SnapshotStore:
             tmp_path.chmod(SNAPSHOT_MODE)
             tmp_path.replace(self._path_for(snapshot_id))
         except (OSError, SnapshotError) as exc:
-            raise SnapshotError(
-                "snapshot_failed", f"cannot write snapshot: {exc}"
-            ) from exc
+            raise SnapshotError("snapshot_failed", f"cannot write snapshot: {exc}") from exc
 
         self.prune()
         return snapshot
@@ -195,9 +190,7 @@ class SnapshotStore:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise SnapshotError(
-                "snapshot_not_found", f"no snapshot {snapshot_id}"
-            ) from exc
+            raise SnapshotError("snapshot_not_found", f"no snapshot {snapshot_id}") from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise SnapshotError(
                 "snapshot_unreadable", f"snapshot {snapshot_id} is unusable: {exc}"
@@ -247,15 +240,13 @@ class SnapshotStore:
                 continue
         return None
 
-    def summaries(self) -> list[dict]:
+    def summaries(self) -> list[dict[str, Any]]:
         out = []
         for snapshot_id in self.ids():
             try:
                 out.append(self.load(snapshot_id).summary())
             except SnapshotError:
-                out.append(
-                    {"snapshot_id": snapshot_id, "unreadable": True}
-                )
+                out.append({"snapshot_id": snapshot_id, "unreadable": True})
         return out
 
     # -- retention ---------------------------------------------------------
@@ -265,7 +256,7 @@ class SnapshotStore:
         if self.retention <= 0:
             return []
         removed = []
-        for snapshot_id in self.ids()[self.retention:]:
+        for snapshot_id in self.ids()[self.retention :]:
             try:
                 self._path_for(snapshot_id).unlink(missing_ok=True)
                 removed.append(snapshot_id)

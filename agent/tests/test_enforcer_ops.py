@@ -129,10 +129,7 @@ class TestSnapshotStore(unittest.TestCase):
     # -- ordering and retention -------------------------------------------
 
     def test_ids_are_newest_first(self):
-        made = [
-            self.take(now=NOW + dt.timedelta(seconds=index)).snapshot_id
-            for index in range(3)
-        ]
+        made = [self.take(now=NOW + dt.timedelta(seconds=index)).snapshot_id for index in range(3)]
         self.assertEqual(self.store.ids(), list(reversed(made)))
 
     def test_retention_keeps_only_the_newest(self):
@@ -244,8 +241,7 @@ class TestCapabilities(EnforcerFixture):
         """
         self.host.has_usbguard = False
         self.system.capabilities()
-        self.enforcer.handle({"op": ops.OP_USB_SET_POLICY,
-                              "payload": {"policy": base_payload()}})
+        self.enforcer.handle({"op": ops.OP_USB_SET_POLICY, "payload": {"policy": base_payload()}})
         flat = [" ".join(call) for call in self.host.calls]
         for call in flat:
             self.assertNotIn("apt", call)
@@ -270,7 +266,6 @@ class TestStateReadback(EnforcerFixture):
         params = self.system.daemon_params()
         self.assertNotIn("RuleFile", params)
         self.assertNotIn("IPCAccessControlFiles", params)
-
 
     def test_missing_daemon_conf_yields_empty_params(self):
         self.daemon_conf.unlink()
@@ -306,16 +301,12 @@ class TestStateReadback(EnforcerFixture):
         self.daemon_conf.unlink()
         state = self.system.state()
         self.assertFalse(state.daemon_conf_readable)
-        self.assertIsNone(
-            state.as_dict()["enforcement_bypassable_without_root"]
-        )
+        self.assertIsNone(state.as_dict()["enforcement_bypassable_without_root"])
 
     def test_clean_daemon_conf_reports_false_not_none(self):
         state = self.system.state()
         self.assertTrue(state.daemon_conf_readable)
-        self.assertIs(
-            state.as_dict()["enforcement_bypassable_without_root"], False
-        )
+        self.assertIs(state.as_dict()["enforcement_bypassable_without_root"], False)
 
 
 class TestIpcExposure(unittest.TestCase):
@@ -461,9 +452,7 @@ class TestDispatch(EnforcerFixture):
         """
         for field in ("rules_path", "command", "rules", "post_apply_command"):
             with self.subTest(field=field):
-                response = self.enforcer.handle(
-                    {"op": ops.OP_CAPABILITIES, field: "/etc/passwd"}
-                )
+                response = self.enforcer.handle({"op": ops.OP_CAPABILITIES, field: "/etc/passwd"})
                 self.assertEqual(response["status"], ops.STATUS_FAILED)
                 self.assertEqual(response["reason_code"], "enforcer_rejected")
 
@@ -480,8 +469,7 @@ class TestDispatch(EnforcerFixture):
         response = self.enforcer.handle(
             {
                 "op": ops.OP_USB_ROLLBACK,
-                "payload": {"snapshot_id": "20261029T100000Z-abcdef01",
-                            "rules": "allow all"},
+                "payload": {"snapshot_id": "20261029T100000Z-abcdef01", "rules": "allow all"},
             }
         )
         self.assertEqual(response["reason_code"], "enforcer_rejected")
@@ -544,7 +532,7 @@ class TestGetStateOp(EnforcerFixture):
         self.assertFalse(response["fingerprint_self_consistent"])
 
     def test_unsupported_host_reports_unsupported_not_empty_state(self):
-        """"No rules loaded" must not be mistaken for "policy applied"."""
+        """ "No rules loaded" must not be mistaken for "policy applied"."""
         self.host.has_usbguard = False
         response = self.enforcer.handle({"op": ops.OP_USB_GET_STATE})
         self.assertEqual(response["status"], ops.STATUS_UNSUPPORTED)
@@ -626,9 +614,7 @@ class TestSetPolicy(EnforcerFixture):
     def test_apply_reports_a_bypassable_host(self):
         """An apply that succeeds on a host where the user can undo it must
         say so on the response, not only when someone asks for state."""
-        self.daemon_conf.write_text(
-            DAEMON_CONF + "IPCAllowedGroups=plugdev\n", encoding="utf-8"
-        )
+        self.daemon_conf.write_text(DAEMON_CONF + "IPCAllowedGroups=plugdev\n", encoding="utf-8")
         response = self.set_policy()
         self.assertEqual(response["status"], ops.STATUS_APPLIED)
         self.assertEqual(response["ipc_exposure"], ["IPCAllowedGroups=plugdev"])
@@ -638,22 +624,16 @@ class TestSetPolicy(EnforcerFixture):
         self.assertEqual(response["ipc_exposure"], [])
 
     def test_get_state_flags_a_bypassable_host(self):
-        self.daemon_conf.write_text(
-            DAEMON_CONF + "IPCAllowedGroups=plugdev\n", encoding="utf-8"
-        )
+        self.daemon_conf.write_text(DAEMON_CONF + "IPCAllowedGroups=plugdev\n", encoding="utf-8")
         self.set_policy()
         response = self.enforcer.handle({"op": ops.OP_USB_GET_STATE})
-        self.assertTrue(
-            response["state"]["enforcement_bypassable_without_root"]
-        )
+        self.assertTrue(response["state"]["enforcement_bypassable_without_root"])
 
     def test_fingerprint_matches_the_installed_file(self):
         response = self.set_policy()
         self.assertEqual(
             response["rules_fingerprint"],
-            derive.extract_fingerprint(
-                self.rules_path.read_text(encoding="utf-8")
-            ),
+            derive.extract_fingerprint(self.rules_path.read_text(encoding="utf-8")),
         )
 
     def test_a_snapshot_is_taken_before_applying(self):
@@ -663,7 +643,7 @@ class TestSetPolicy(EnforcerFixture):
         self.assertEqual(snapshot.rules_text, "allow id 1111:2222\n")
 
     def test_first_apply_on_a_clean_host_snapshots_the_empty_state(self):
-        """"There was no policy here" is a real rollback target."""
+        """ "There was no policy here" is a real rollback target."""
         response = self.set_policy()
         snapshot = self.store.load(response["snapshot"]["snapshot_id"])
         self.assertEqual(snapshot.rules_text, "")
@@ -676,9 +656,7 @@ class TestSetPolicy(EnforcerFixture):
         self.assertEqual(self.store.ids(), [], "snapshotted despite rejection")
 
     def test_rejection_lists_every_problem(self):
-        response = self.set_policy(
-            {"schema": "wrong", "mode": "nope", "protected_classes": []}
-        )
+        response = self.set_policy({"schema": "wrong", "mode": "nope", "protected_classes": []})
         self.assertEqual(response["reason_code"], "enforcer_rejected")
         self.assertGreater(len(response["problems"]), 1)
 
@@ -726,9 +704,7 @@ class TestApplyFailureRollsBack(EnforcerFixture):
         response = self.set_policy()
         self.assertEqual(response["status"], ops.STATUS_ROLLED_BACK)
         self.assertEqual(response["reason_code"], "enforce_failed")
-        self.assertEqual(
-            self.rules_path.read_text(encoding="utf-8"), self.previous
-        )
+        self.assertEqual(self.rules_path.read_text(encoding="utf-8"), self.previous)
 
     def test_persistently_failed_restart_cannot_verify_its_own_rollback(self):
         """A daemon that never restarts leaves the host in a chosen-by-nobody
@@ -802,9 +778,7 @@ class TestApplyFailureRollsBack(EnforcerFixture):
     def test_rollback_restores_the_previous_rules(self):
         self.host.restart_loads_nothing = True
         self.set_policy()
-        self.assertEqual(
-            self.rules_path.read_text(encoding="utf-8"), self.previous
-        )
+        self.assertEqual(self.rules_path.read_text(encoding="utf-8"), self.previous)
 
     def test_unverifiable_rollback_reports_an_incident(self):
         """If the undo cannot be verified, that is an alert, not a retry."""
@@ -839,9 +813,7 @@ class TestRollbackOp(EnforcerFixture):
             {"op": ops.OP_USB_ROLLBACK, "payload": {"snapshot_id": snapshot_id}}
         )
         self.assertEqual(response["status"], ops.STATUS_ROLLED_BACK)
-        self.assertEqual(
-            self.rules_path.read_text(encoding="utf-8"), "allow id 1111:2222\n"
-        )
+        self.assertEqual(self.rules_path.read_text(encoding="utf-8"), "allow id 1111:2222\n")
 
     def test_traversal_snapshot_id_is_refused(self):
         """The id is the only field, and it comes from a process the threat

@@ -1,6 +1,6 @@
 """The closed operation set enforcerd will execute.
 
-This layer is deliberately transport-free: a request is a dict, a response is
+This layer is deliberately transport-free: a request is a dict[str, Any], a response is
 a dict, and nothing here knows about sockets, framing or peer credentials.
 Two reasons. It makes the privileged logic testable without root or a running
 daemon, and it confines the one part of the integration still awaiting
@@ -37,7 +37,7 @@ from typing import Any
 
 from . import derive, snapshots
 from .intent import IntentError, parse
-from .system import HostError, UsbGuardSystem
+from .system import HostError, UsbGuardSystem, UsbState
 
 OP_CAPABILITIES = "OP_CAPABILITIES"
 OP_USB_GET_STATE = "OP_USB_GET_STATE"
@@ -77,9 +77,7 @@ class OpError(Exception):
         super().__init__(message)
 
 
-def _reject_unknown(
-    obj: dict, known: frozenset[str], where: str
-) -> None:
+def _reject_unknown(obj: dict[str, Any], known: frozenset[str], where: str) -> None:
     unknown = set(obj) - known
     if unknown:
         raise OpError(
@@ -95,9 +93,7 @@ class Enforcer:
     """Executes the operation set against a host."""
 
     system: UsbGuardSystem = field(default_factory=UsbGuardSystem)
-    store: snapshots.SnapshotStore = field(
-        default_factory=snapshots.SnapshotStore
-    )
+    store: snapshots.SnapshotStore = field(default_factory=snapshots.SnapshotStore)
     #: Injected so tests are deterministic and so an audit record of a
     #: rejected op can be asserted on.
     clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc)
@@ -105,7 +101,7 @@ class Enforcer:
 
     # -- dispatch ----------------------------------------------------------
 
-    def handle(self, request: Any) -> dict:
+    def handle(self, request: Any) -> dict[str, Any]:
         """Execute one request, returning a response dict.
 
         Never raises for a bad request: a rejection is a response, because the
@@ -119,7 +115,7 @@ class Enforcer:
         except (HostError, snapshots.SnapshotError) as exc:
             return self._failure(exc.reason_code, str(exc))
 
-    def _dispatch(self, request: Any) -> dict:
+    def _dispatch(self, request: Any) -> dict[str, Any]:
         if not isinstance(request, dict):
             raise OpError("enforcer_rejected", "request must be a JSON object")
 
@@ -131,8 +127,7 @@ class Enforcer:
             # likely to be hostile.
             raise OpError(
                 "enforcer_rejected",
-                f"unknown operation {op!r}; known operations are "
-                f"{', '.join(OPERATIONS)}",
+                f"unknown operation {op!r}; known operations are {', '.join(OPERATIONS)}",
             )
 
         _reject_unknown(request, _REQUEST_FIELDS, "request")
@@ -158,7 +153,7 @@ class Enforcer:
 
     # -- responses ---------------------------------------------------------
 
-    def _envelope(self, status: str, **extra) -> dict:
+    def _envelope(self, status: str, **extra: Any) -> dict[str, Any]:
         response = {
             "status": status,
             "at": self.clock().replace(microsecond=0).isoformat(),
@@ -168,17 +163,15 @@ class Enforcer:
 
     def _failure(
         self, reason_code: str, message: str, *, problems: list[str] | None = None
-    ) -> dict:
-        response = self._envelope(
-            STATUS_FAILED, reason_code=reason_code, message=message
-        )
+    ) -> dict[str, Any]:
+        response = self._envelope(STATUS_FAILED, reason_code=reason_code, message=message)
         if problems:
             response["problems"] = problems
         return response
 
     # -- OP_CAPABILITIES ---------------------------------------------------
 
-    def capabilities(self) -> dict:
+    def capabilities(self) -> dict[str, Any]:
         caps = self.system.capabilities()
         return self._envelope(
             STATUS_OK,
@@ -188,7 +181,7 @@ class Enforcer:
 
     # -- OP_USB_GET_STATE --------------------------------------------------
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         caps = self.system.capabilities()
         if not caps.usbguard_present:
             # Reporting `unsupported` rather than an empty state: a dashboard
@@ -211,11 +204,9 @@ class Enforcer:
 
     # -- OP_USB_SET_POLICY -------------------------------------------------
 
-    def set_policy(self, policy: Any, *, policy_version: Any = None) -> dict:
+    def set_policy(self, policy: Any, *, policy_version: Any = None) -> dict[str, Any]:
         if not isinstance(policy, dict):
-            raise OpError(
-                "enforcer_rejected", "payload.policy must be a usb_control object"
-            )
+            raise OpError("enforcer_rejected", "payload.policy must be a usb_control object")
         if policy_version is not None and not isinstance(policy_version, int):
             raise OpError("enforcer_rejected", "'policy_version' must be an integer")
 
@@ -300,7 +291,7 @@ class Enforcer:
             ipc_exposure=list(after.ipc_exposure),
         )
 
-    def _verify(self, expected: list[str], observed) -> list[str]:
+    def _verify(self, expected: list[str], observed: UsbState) -> list[str]:
         """Compare intent against what the OS reports, not against exit codes.
 
         Checks the rules the *daemon* has loaded, not the file just written.
@@ -357,8 +348,7 @@ class Enforcer:
             )
             raise OpError(
                 "verify_drift",
-                f"state read back from usbguard does not match the policy: "
-                f"{detail}",
+                f"state read back from usbguard does not match the policy: {detail}",
             )
 
         preceding = loaded[:at]
@@ -375,7 +365,7 @@ class Enforcer:
 
     # -- OP_USB_ROLLBACK ---------------------------------------------------
 
-    def rollback(self, snapshot_id: Any) -> dict:
+    def rollback(self, snapshot_id: Any) -> dict[str, Any]:
         if not isinstance(snapshot_id, str):
             raise OpError("enforcer_rejected", "'snapshot_id' must be a string")
 
@@ -414,7 +404,7 @@ class Enforcer:
 
     def _rollback_after_failure(
         self, snapshot: snapshots.Snapshot, reason_code: str, message: str
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Undo a failed apply, then verify the undo.
 
         If the rollback itself cannot be verified the response is `failed`

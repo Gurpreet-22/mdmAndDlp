@@ -50,6 +50,8 @@ import struct
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 from . import ops
 
@@ -104,9 +106,7 @@ def peer_credentials(conn: socket.socket) -> PeerCredentials:
     influence it, which is what distinguishes this from any identity claim
     that arrives in the payload.
     """
-    raw = conn.getsockopt(
-        socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
-    )
+    raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
     pid, uid, gid = struct.unpack("3i", raw)
     return PeerCredentials(pid=pid, uid=uid, gid=gid)
 
@@ -142,20 +142,16 @@ def resolve_gid(group: str | int) -> int:
         ) from exc
 
 
-def encode_response(response: dict) -> bytes:
+def encode_response(response: dict[str, Any]) -> bytes:
     """Encode one response as a single newline-terminated line.
 
     `json.dumps` escapes control characters, so no value inside the response
     can introduce a newline and split the record.
     """
-    return (
-        json.dumps(response, separators=(",", ":"), default=str) + "\n"
-    ).encode("utf-8")
+    return (json.dumps(response, separators=(",", ":"), default=str) + "\n").encode("utf-8")
 
 
-def read_request_line(
-    conn: socket.socket, *, max_bytes: int = MAX_REQUEST_BYTES
-) -> bytes | None:
+def read_request_line(conn: socket.socket, *, max_bytes: int = MAX_REQUEST_BYTES) -> bytes | None:
     """Read one newline-terminated line, bounded.
 
     Returns None when the peer closes without sending anything. Raises
@@ -208,6 +204,19 @@ class EnforcerServer:
     _wake_r: int | None = None
     _wake_w: int | None = None
 
+    def _should_stop(self) -> bool:
+        """Whether shutdown has been requested.
+
+        A method rather than reading `_stopping` directly, because the flag is
+        volatile: `close()` is called from a signal handler and from other
+        threads, and the serving loop spends nearly all its time blocked in
+        `select()` or `accept()`. Re-reading it after each of those is the
+        point. Touching the attribute inline would also let a type checker
+        assume it cannot change within one iteration, and conclude the
+        post-blocking checks are dead code.
+        """
+        return self._stopping
+
     def _required_peer_uid(self) -> int:
         if self.peer_uid is None:
             self.peer_uid = resolve_uid(self.peer_user)
@@ -237,9 +246,7 @@ class EnforcerServer:
         except OSError as exc:
             sock.close()
             path.unlink(missing_ok=True)
-            raise ServiceError(
-                f"cannot set ownership or mode on {path}: {exc}"
-            ) from exc
+            raise ServiceError(f"cannot set ownership or mode on {path}: {exc}") from exc
 
         sock.listen(LISTEN_BACKLOG)
         self._sock = sock
@@ -266,9 +273,7 @@ class EnforcerServer:
                     os.chown(directory, 0, gid)
                 directory.chmod(RUNDIR_MODE)
         except OSError as exc:
-            raise ServiceError(
-                f"cannot prepare {directory}: {exc}"
-            ) from exc
+            raise ServiceError(f"cannot prepare {directory}: {exc}") from exc
 
     def _remove_stale_socket(self, path: Path) -> None:
         """Clear a socket left behind by a previous run.
@@ -281,9 +286,7 @@ class EnforcerServer:
             return
         try:
             if not path.is_socket():
-                raise ServiceError(
-                    f"{path} exists and is not a socket; refusing to remove it"
-                )
+                raise ServiceError(f"{path} exists and is not a socket; refusing to remove it")
             path.unlink()
         except OSError as exc:
             raise ServiceError(f"cannot remove stale socket {path}: {exc}") from exc
@@ -316,27 +319,37 @@ class EnforcerServer:
 
     def serve_forever(self) -> None:
         sock = self._sock or self.bind()
+        # bind() always creates the wakeup pipe. Captured in a local so the
+        # shutdown check below is a plain int comparison rather than against
+        # an optional attribute another thread could clear mid-loop.
+        wake = self._wake_r
+        if wake is None:  # pragma: no cover -- bind() guarantees it
+            raise ServiceError("wakeup pipe missing; bind() did not complete")
+
+        # Both as raw descriptors, so select receives one uniform type.
+        listen_fd = sock.fileno()
         try:
-            while not self._stopping:
+            while True:
+                if self._should_stop():
+                    break
+
                 # Wait until there is either a connection or a shutdown
                 # request, so accept() is never entered blind.
                 try:
-                    readable, _, _ = select.select(
-                        [sock, self._wake_r], [], []
-                    )
+                    readable, _, _ = select.select([listen_fd, wake], [], [])
                 except (OSError, ValueError):
-                    if self._stopping:
+                    if self._should_stop():
                         break
                     LOG.exception("select failed")
                     continue
 
-                if self._wake_r in readable or self._stopping:
+                if wake in readable or self._stopping:
                     break
 
                 try:
                     conn, _ = sock.accept()
                 except OSError:
-                    if self._stopping:
+                    if self._should_stop():
                         break
                     LOG.exception("accept failed")
                     continue
@@ -362,8 +375,7 @@ class EnforcerServer:
                 # Logged with the uid, never with the payload -- which has not
                 # even been read at this point.
                 LOG.warning(
-                    "rejected connection from uid %d pid %d; only uid %d may "
-                    "call enforcerd",
+                    "rejected connection from uid %d pid %d; only uid %d may call enforcerd",
                     creds.uid,
                     creds.pid,
                     expected_uid,
@@ -425,7 +437,7 @@ class EnforcerServer:
         )
         self._send(conn, response)
 
-    def _send(self, conn: socket.socket, response: dict) -> None:
+    def _send(self, conn: socket.socket, response: dict[str, Any]) -> None:
         try:
             conn.sendall(encode_response(response))
         except OSError as exc:
@@ -452,12 +464,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PEER_USER,
         help="only this user may connect (SO_PEERCRED uid check)",
     )
-    parser.add_argument(
-        "--rules-path", default=None, help="override the usbguard rules path"
-    )
-    parser.add_argument(
-        "--snapshot-dir", default=None, help="override the snapshot store"
-    )
+    parser.add_argument("--rules-path", default=None, help="override the usbguard rules path")
+    parser.add_argument("--snapshot-dir", default=None, help="override the snapshot store")
     parser.add_argument(
         "--allow-hid-on-authorised",
         action="store_true",
@@ -466,9 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
             "interface; off by default because that is the BadUSB shape"
         ),
     )
-    parser.add_argument(
-        "--verbose", action="store_true", help="log at debug level"
-    )
+    parser.add_argument("--verbose", action="store_true", help="log at debug level")
     return parser
 
 
@@ -486,14 +492,11 @@ def main(argv: list[str] | None = None) -> int:
         # Said plainly rather than failing later on a permission error that
         # looks like something else.
         LOG.error(
-            "enforcerd must run as root: it writes the usbguard rules and "
-            "restarts the daemon"
+            "enforcerd must run as root: it writes the usbguard rules and restarts the daemon"
         )
         return 1
 
-    adapter = system.UsbGuardSystem(
-        **({"rules_path": args.rules_path} if args.rules_path else {})
-    )
+    adapter = system.UsbGuardSystem(**({"rules_path": args.rules_path} if args.rules_path else {}))
     store = snapshots.SnapshotStore(
         **({"directory": args.snapshot_dir} if args.snapshot_dir else {})
     )
@@ -508,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
         peer_user=args.peer_user,
     )
 
-    def shutdown(signum, _frame):
+    def shutdown(signum: int, _frame: FrameType | None) -> None:
         LOG.info("signal %d received, shutting down", signum)
         server.close()
 

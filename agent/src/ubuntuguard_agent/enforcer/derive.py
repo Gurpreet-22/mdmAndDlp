@@ -56,8 +56,7 @@ FINGERPRINT_PREFIX = "# policy-fingerprint: sha256:"
 #: Tightening this is a one-line change here, but it should be a decision
 #: rather than a default.
 TRAILING_ALLOW_NOTE = (
-    "default-allow for classes outside protected_classes; "
-    "see derive.TRAILING_ALLOW_NOTE"
+    "default-allow for classes outside protected_classes; see derive.TRAILING_ALLOW_NOTE"
 )
 
 
@@ -72,9 +71,7 @@ def quote(value: str) -> str:
     return f'"{escaped}"'
 
 
-def render_device_rule(
-    match: DeviceMatch, *, allow_hid_on_authorised: bool = False
-) -> str:
+def render_device_rule(match: DeviceMatch, *, allow_hid_on_authorised: bool = False) -> str:
     """Render the allow rule for one authorised device.
 
     By default the rule additionally requires that the device present no
@@ -105,9 +102,7 @@ def compute_fingerprint(lines: list[str]) -> str:
     produces, which is how `OP_USB_GET_STATE` detects drift.
     """
     material = "\n".join(
-        line.strip()
-        for line in lines
-        if line.strip() and not line.lstrip().startswith("#")
+        line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -131,11 +126,7 @@ def derive_rules(
     # 1. specifically authorised devices
     if intent.mode != MODE_MONITOR:
         for match, _origin in intent.effective_matches(now):
-            rules.append(
-                render_device_rule(
-                    match, allow_hid_on_authorised=allow_hid_on_authorised
-                )
-            )
+            rules.append(render_device_rule(match, allow_hid_on_authorised=allow_hid_on_authorised))
 
     # 2. the protected classes
     if intent.mode == MODE_MONITOR:
@@ -171,9 +162,7 @@ def render_policy(
     now = now or dt.datetime.now(dt.timezone.utc)
     stamp = now.replace(microsecond=0).isoformat()
 
-    body = derive_rules(
-        intent, now=now, allow_hid_on_authorised=allow_hid_on_authorised
-    )
+    body = derive_rules(intent, now=now, allow_hid_on_authorised=allow_hid_on_authorised)
     fingerprint = compute_fingerprint(body)
 
     active = intent.effective_matches(now)
@@ -193,8 +182,7 @@ def render_policy(
     if policy_version is not None:
         head.append(f"# policy version: {policy_version}")
     head += [
-        f"# hid guard     : "
-        f"{'off' if allow_hid_on_authorised else 'on'}",
+        f"# hid guard     : {'off' if allow_hid_on_authorised else 'on'}",
         f"# note          : {TRAILING_ALLOW_NOTE}",
         FINGERPRINT_PREFIX + fingerprint,
         "#",
@@ -221,10 +209,7 @@ def render_policy(
         ]
 
     if active:
-        annotated.append(
-            f"# ---- authorised devices ({len(active)}) "
-            + "-" * 30
-        )
+        annotated.append(f"# ---- authorised devices ({len(active)}) " + "-" * 30)
         for match, origin in active:
             annotated.append(f"# {origin}")
             if not match.is_exact:
@@ -239,8 +224,7 @@ def render_policy(
         tail += ["", "# ---- expired exceptions (no longer granting access) ----"]
         for exc in expired:
             tail.append(
-                f"#   {exc.exception_id}: {exc.match.usb_id} expired "
-                f"{exc.expires_at.isoformat()}"
+                f"#   {exc.exception_id}: {exc.match.usb_id} expired {exc.expires_at.isoformat()}"
             )
 
     return "\n".join(head + annotated + body + tail) + "\n"
@@ -249,7 +233,7 @@ def render_policy(
 def extract_fingerprint(policy_text: str) -> str | None:
     for line in policy_text.splitlines():
         if line.startswith(FINGERPRINT_PREFIX):
-            return line[len(FINGERPRINT_PREFIX):].strip()
+            return line[len(FINGERPRINT_PREFIX) :].strip()
     return None
 
 

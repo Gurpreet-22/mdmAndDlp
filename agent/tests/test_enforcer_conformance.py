@@ -66,7 +66,7 @@ def parse_rule(rule: str) -> tuple[bool, str]:
     canonical = ""
     for line in proc.stdout.splitlines():
         if line.startswith("OUTPUT: "):
-            canonical = line[len("OUTPUT: "):]
+            canonical = line[len("OUTPUT: ") :]
     # A zero exit with no OUTPUT line means we are not talking to the parser
     # we think we are -- treat it as a failure rather than a silent pass.
     return bool(canonical), canonical
@@ -135,9 +135,7 @@ def exception_entry(
         "reason": "vendor on site delivering signed firmware, ticket SEC-4821",
         "created_by": "security-analyst",
         "created_at": created.isoformat().replace("+00:00", "Z"),
-        "expires_at": (
-            created + dt.timedelta(hours=hours)
-        ).isoformat().replace("+00:00", "Z"),
+        "expires_at": (created + dt.timedelta(hours=hours)).isoformat().replace("+00:00", "Z"),
     }
 
 
@@ -175,9 +173,7 @@ class TestParserIsActuallyValidating(unittest.TestCase):
         for bad in self.MALFORMED:
             with self.subTest(rule=bad):
                 accepted, _ = parse_rule(bad)
-                self.assertFalse(
-                    accepted, f"parser accepted malformed rule: {bad!r}"
-                )
+                self.assertFalse(accepted, f"parser accepted malformed rule: {bad!r}")
 
     def test_a_known_good_rule_is_accepted(self):
         accepted, canonical = parse_rule("allow id 0781:5583")
@@ -242,15 +238,11 @@ class TestDerivedRuleConformance(unittest.TestCase):
         for name in sorted(classes.ALWAYS_ALLOW_CLASS_CODES):
             names = sorted({name, "hid", "hub"})
             with self.subTest(always_allow=name):
-                self.assert_conforms(
-                    base_payload(always_allow_classes=names)
-                )
+                self.assert_conforms(base_payload(always_allow_classes=names))
 
     def test_whole_always_allow_vocabulary_at_once_conforms(self):
         self.assert_conforms(
-            base_payload(
-                always_allow_classes=sorted(classes.ALWAYS_ALLOW_CLASS_CODES)
-            )
+            base_payload(always_allow_classes=sorted(classes.ALWAYS_ALLOW_CLASS_CODES))
         )
 
     def test_every_protected_class_conforms(self):
@@ -259,9 +251,7 @@ class TestDerivedRuleConformance(unittest.TestCase):
                 self.assert_conforms(base_payload(protected_classes=[name]))
 
     def test_whole_protected_vocabulary_at_once_conforms(self):
-        self.assert_conforms(
-            base_payload(protected_classes=sorted(classes.PROTECTED_CLASS_CODES))
-        )
+        self.assert_conforms(base_payload(protected_classes=sorted(classes.PROTECTED_CLASS_CODES)))
 
     # -- the value space the server can send -------------------------------
 
@@ -286,9 +276,7 @@ class TestDerivedRuleConformance(unittest.TestCase):
         for serial in serials:
             self.assertRegex(serial, intent.SERIAL_RE, "fixture serial is invalid")
             with self.subTest(serial=serial, length=len(serial)):
-                self.assert_conforms(
-                    base_payload(allowlist=[allow_entry(serial=serial)])
-                )
+                self.assert_conforms(base_payload(allowlist=[allow_entry(serial=serial)]))
 
     def test_vendor_and_product_id_range_conforms(self):
         for vendor, product in (
@@ -298,17 +286,13 @@ class TestDerivedRuleConformance(unittest.TestCase):
         ):
             with self.subTest(usb_id=f"{vendor}:{product}"):
                 self.assert_conforms(
-                    base_payload(
-                        allowlist=[allow_entry(vendor=vendor, product=product)]
-                    )
+                    base_payload(allowlist=[allow_entry(vendor=vendor, product=product)])
                 )
 
     def test_model_wide_match_conforms(self):
         """serial_match 'any' omits the serial clause entirely."""
         rules = self.assert_conforms(
-            base_payload(
-                allowlist=[allow_entry(serial=None, serial_match="any")]
-            )
+            base_payload(allowlist=[allow_entry(serial=None, serial_match="any")])
         )
         self.assertTrue(
             any(r.startswith("allow id 0781:5583 with-interface") for r in rules),
@@ -344,14 +328,10 @@ class TestDerivedRuleConformance(unittest.TestCase):
         )
         created = NOW - dt.timedelta(hours=20)
         stale["created_at"] = created.isoformat().replace("+00:00", "Z")
-        stale["expires_at"] = (
-            created + dt.timedelta(hours=2)
-        ).isoformat().replace("+00:00", "Z")
+        stale["expires_at"] = (created + dt.timedelta(hours=2)).isoformat().replace("+00:00", "Z")
 
         rules = self.assert_conforms(
-            base_payload(
-                exceptions=[stale, exception_entry(exception_id="exc-active")]
-            )
+            base_payload(exceptions=[stale, exception_entry(exception_id="exc-active")])
         )
         joined = "\n".join(rules)
         self.assertNotIn("EXPIRED1", joined, "expired exception leaked into rules")
@@ -412,9 +392,7 @@ class TestRenderedPolicyConformance(unittest.TestCase):
         self.assertTrue(accepted, f"sample rule in header is invalid: {sample}")
         self.assertEqual(canonical, sample)
 
-        enforcing = intent.parse(
-            base_payload(mode=intent.MODE_ALLOWLIST), now=NOW
-        )
+        enforcing = intent.parse(base_payload(mode=intent.MODE_ALLOWLIST), now=NOW)
         self.assertIn(
             sample,
             derive.derive_rules(enforcing, now=NOW),

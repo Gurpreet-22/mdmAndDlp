@@ -92,10 +92,7 @@ class ServiceFixture(unittest.TestCase):
             if raw is not None:
                 client.sendall(raw)
             else:
-                client.sendall(
-                    json.dumps(payload, separators=(",", ":")).encode("utf-8")
-                    + b"\n"
-                )
+                client.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
             chunks = []
             while True:
                 chunk = client.recv(4096)
@@ -161,9 +158,7 @@ class TestBoundedReads(unittest.TestCase):
     def test_reads_a_single_line(self):
         left, right = self.pair()
         right.sendall(b'{"op":"OP_CAPABILITIES"}\n')
-        self.assertEqual(
-            service.read_request_line(left), b'{"op":"OP_CAPABILITIES"}'
-        )
+        self.assertEqual(service.read_request_line(left), b'{"op":"OP_CAPABILITIES"}')
 
     def test_reassembles_a_line_split_across_packets(self):
         """A large policy will not arrive in one recv."""
@@ -243,9 +238,7 @@ class TestSocketSetup(ServiceFixture):
         with self.assertRaises(service.ServiceError) as caught:
             self.server.bind()
         self.assertIn("refusing to remove", str(caught.exception))
-        self.assertEqual(
-            Path(self.socket_path).read_text(encoding="utf-8"), "not a socket"
-        )
+        self.assertEqual(Path(self.socket_path).read_text(encoding="utf-8"), "not a socket")
 
     def test_unknown_group_is_refused_with_a_clear_message(self):
         """A root-only socket agentd cannot reach would be baffling."""
@@ -286,9 +279,7 @@ class TestSocketSetup(ServiceFixture):
         thread.start()
 
         # Confirm it is actually serving before asking it to stop.
-        self.assertEqual(
-            self.request({"op": ops.OP_CAPABILITIES})["status"], ops.STATUS_OK
-        )
+        self.assertEqual(self.request({"op": ops.OP_CAPABILITIES})["status"], ops.STATUS_OK)
 
         started = time.monotonic()
         self.server.close()
@@ -363,9 +354,7 @@ class TestPeerCheck(ServiceFixture):
             }
         )
         self.assertEqual(response["reason_code"], "peer_rejected")
-        self.assertFalse(
-            self.rules_path.exists(), "a refused peer changed the policy"
-        )
+        self.assertFalse(self.rules_path.exists(), "a refused peer changed the policy")
 
     def test_correct_uid_is_accepted(self):
         self.server.allow_any_peer = False
@@ -407,18 +396,14 @@ class TestOperationsOverTheSocket(ServiceFixture):
         )
 
     def test_get_state_after_apply(self):
-        self.request(
-            {"op": ops.OP_USB_SET_POLICY, "payload": {"policy": base_payload()}}
-        )
+        self.request({"op": ops.OP_USB_SET_POLICY, "payload": {"policy": base_payload()}})
         response = self.request({"op": ops.OP_USB_GET_STATE})
         self.assertEqual(response["status"], ops.STATUS_OK)
         self.assertTrue(response["fingerprint_self_consistent"])
 
     def test_rollback_over_the_socket(self):
         self.rules_path.write_text("allow id 1111:2222\n", encoding="utf-8")
-        applied = self.request(
-            {"op": ops.OP_USB_SET_POLICY, "payload": {"policy": base_payload()}}
-        )
+        applied = self.request({"op": ops.OP_USB_SET_POLICY, "payload": {"policy": base_payload()}})
         response = self.request(
             {
                 "op": ops.OP_USB_ROLLBACK,
@@ -426,9 +411,7 @@ class TestOperationsOverTheSocket(ServiceFixture):
             }
         )
         self.assertEqual(response["status"], ops.STATUS_ROLLED_BACK)
-        self.assertEqual(
-            self.rules_path.read_text(encoding="utf-8"), "allow id 1111:2222\n"
-        )
+        self.assertEqual(self.rules_path.read_text(encoding="utf-8"), "allow id 1111:2222\n")
 
     def test_unknown_op_is_refused_over_the_socket(self):
         response = self.request({"op": "OP_RUN_SHELL"})
@@ -442,9 +425,7 @@ class TestOperationsOverTheSocket(ServiceFixture):
 
     def test_malformed_json_response_does_not_echo_the_input(self):
         secret = "s3cret-serial-value"
-        response = self.request(
-            None, raw=b'{"op": "X", "secret": "' + secret.encode() + b'" \n'
-        )
+        response = self.request(None, raw=b'{"op": "X", "secret": "' + secret.encode() + b'" \n')
         self.assertNotIn(secret, json.dumps(response))
 
     def test_oversized_request_is_refused(self):
@@ -526,9 +507,7 @@ class TestReferenceClient(ServiceFixture):
     def setUp(self):
         super().setUp()
         self.start_server()
-        self.client = client.EnforcerClient(
-            socket_path=self.socket_path, timeout=20
-        )
+        self.client = client.EnforcerClient(socket_path=self.socket_path, timeout=20)
 
     def test_capabilities_round_trip(self):
         response = self.client.capabilities()
@@ -552,9 +531,7 @@ class TestReferenceClient(ServiceFixture):
         self.assertEqual(response["status"], ops.STATUS_ROLLED_BACK)
 
     def test_invalid_policy_is_reported_with_problems(self):
-        response = self.client.set_policy(
-            base_payload(always_allow_classes=["hub"])
-        )
+        response = self.client.set_policy(base_payload(always_allow_classes=["hub"]))
         self.assertEqual(response["reason_code"], "enforcer_rejected")
         self.assertTrue(response["problems"])
 
@@ -589,9 +566,7 @@ class TestClientWithoutAServer(unittest.TestCase):
 
     def test_apply_against_a_missing_enforcer_is_not_applied(self):
         missing = str(Path(self.tmp.name) / "nope.sock")
-        response = client.EnforcerClient(socket_path=missing).set_policy(
-            base_payload()
-        )
+        response = client.EnforcerClient(socket_path=missing).set_policy(base_payload())
         self.assertNotEqual(response["status"], ops.STATUS_APPLIED)
         self.assertEqual(response["reason_code"], "enforcer_unavailable")
 

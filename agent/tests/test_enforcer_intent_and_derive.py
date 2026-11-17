@@ -123,8 +123,7 @@ class TestBundledExamplesMatchTheAuthoredOnes(unittest.TestCase):
                 self.assertEqual(
                     copy.read_bytes(),
                     authored.read_bytes(),
-                    f"bundled copy of {relative} has drifted from the "
-                    f"authored example",
+                    f"bundled copy of {relative} has drifted from the authored example",
                 )
 
 
@@ -141,9 +140,7 @@ class TestAgainstUbuntuGuardFixtures(unittest.TestCase):
         self.assertTrue(parsed.allowlist[0].match.is_exact)
 
     def test_her_block_all_example_is_accepted(self):
-        parsed = intent.parse(
-            load("valid", "policy.usb_control.block_all_storage.json"), now=NOW
-        )
+        parsed = intent.parse(load("valid", "policy.usb_control.block_all_storage.json"), now=NOW)
         self.assertEqual(parsed.mode, intent.MODE_BLOCK_ALL)
         self.assertEqual(len(parsed.exceptions), 1)
         self.assertFalse(parsed.exceptions[0].match.is_exact)
@@ -152,8 +149,7 @@ class TestAgainstUbuntuGuardFixtures(unittest.TestCase):
         parsed = intent.parse(load("valid", "policy.usb_control.allowlist.json"), now=NOW)
         rules = derive.derive_rules(parsed, now=NOW)
         self.assertIn(
-            'allow id 0781:5583 serial "4C530001120523117082" '
-            "with-interface none-of { 03:*:* }",
+            'allow id 0781:5583 serial "4C530001120523117082" with-interface none-of { 03:*:* }',
             rules,
         )
         self.assertIn("block with-interface one-of { 08:*:* }", rules)
@@ -230,9 +226,7 @@ class TestClasses(unittest.TestCase):
         self.assertEqual(classes.protected_codes(["image"]), ("06",))
 
     def test_both_protected_classes_together(self):
-        self.assertEqual(
-            classes.protected_codes(["mass_storage", "image"]), ("08", "06")
-        )
+        self.assertEqual(classes.protected_codes(["mass_storage", "image"]), ("08", "06"))
 
     def test_hid_and_hub_codes(self):
         self.assertEqual(classes.always_allow_codes(["hid"]), ("03",))
@@ -243,9 +237,7 @@ class TestClasses(unittest.TestCase):
         self.assertEqual(classes.always_allow_codes(["network"]), ("02", "0a"))
 
     def test_duplicate_codes_are_collapsed(self):
-        self.assertEqual(
-            classes.always_allow_codes(["cdc", "network"]), ("02", "0a")
-        )
+        self.assertEqual(classes.always_allow_codes(["cdc", "network"]), ("02", "0a"))
 
     def test_unknown_class_name_raises_rather_than_guessing(self):
         with self.assertRaises(KeyError):
@@ -255,9 +247,7 @@ class TestClasses(unittest.TestCase):
 
     def test_dock_classes_are_expressible(self):
         """USB-C docks need billboard, network, audio, video."""
-        codes = classes.always_allow_codes(
-            ["hid", "hub", "billboard", "network", "audio", "video"]
-        )
+        codes = classes.always_allow_codes(["hid", "hub", "billboard", "network", "audio", "video"])
         for expected in ("03", "09", "11", "02", "01", "0e"):
             self.assertIn(expected, codes)
 
@@ -282,8 +272,13 @@ class TestIntentValidation(unittest.TestCase):
 
     def test_each_required_field_is_enforced(self):
         for field in (
-            "schema", "mode", "protected_classes",
-            "always_allow_classes", "allowlist", "exceptions", "reporting",
+            "schema",
+            "mode",
+            "protected_classes",
+            "always_allow_classes",
+            "allowlist",
+            "exceptions",
+            "reporting",
         ):
             with self.subTest(field=field):
                 payload = base_payload()
@@ -306,9 +301,7 @@ class TestIntentValidation(unittest.TestCase):
 
     def test_all_problems_reported_not_just_the_first(self):
         with self.assertRaises(intent.IntentError) as ctx:
-            intent.parse(
-                base_payload(mode="nope", protected_classes=["nonsense"]), now=NOW
-            )
+            intent.parse(base_payload(mode="nope", protected_classes=["nonsense"]), now=NOW)
         self.assertGreaterEqual(len(ctx.exception.problems), 2)
 
     def test_protected_and_always_allow_overlap_rejected(self):
@@ -414,9 +407,7 @@ class TestExceptionValidation(unittest.TestCase):
         """A timestamp without an offset shifts expiry per timezone."""
         with self.assertRaises(intent.IntentError) as ctx:
             intent.parse(
-                base_payload(
-                    exceptions=[exception_entry(expires_at="2026-10-29T16:00:00")]
-                ),
+                base_payload(exceptions=[exception_entry(expires_at="2026-10-29T16:00:00")]),
                 now=NOW,
             )
         self.assertIn("UTC offset", str(ctx.exception))
@@ -494,9 +485,7 @@ class TestDerivation(unittest.TestCase):
         rules = derive.derive_rules(
             self.parse(always_allow_classes=["hid", "hub", "video"]), now=NOW
         )
-        allow = next(
-            r for r in rules if r.startswith("allow with-interface one-of")
-        )
+        allow = next(r for r in rules if r.startswith("allow with-interface one-of"))
         for code in ("03:*:*", "09:*:*", "0e:*:*"):
             self.assertIn(code, allow)
 
@@ -561,18 +550,12 @@ class TestRenderedPolicy(unittest.TestCase):
     def test_fingerprint_ignores_generation_time(self):
         parsed = self.parse()
         a = derive.render_policy(parsed, now=NOW)
-        b = derive.render_policy(
-            parsed, now=dt.datetime(2027, 1, 1, tzinfo=dt.timezone.utc)
-        )
-        self.assertEqual(
-            derive.extract_fingerprint(a), derive.extract_fingerprint(b)
-        )
+        b = derive.render_policy(parsed, now=dt.datetime(2027, 1, 1, tzinfo=dt.timezone.utc))
+        self.assertEqual(derive.extract_fingerprint(a), derive.extract_fingerprint(b))
 
     def test_tampering_breaks_verification(self):
         text = derive.render_policy(self.parse(), now=NOW)
-        tampered = text.replace(
-            "block with-interface", "allow with-interface"
-        )
+        tampered = text.replace("block with-interface", "allow with-interface")
         self.assertFalse(derive.verify_fingerprint(tampered))
 
     def test_monitor_mode_is_labelled_in_the_output(self):

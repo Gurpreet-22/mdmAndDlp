@@ -85,15 +85,11 @@ _REQUIRED_PAYLOAD_FIELDS = (
     "reporting",
 )
 _MATCH_FIELDS = frozenset({"vendor_id", "product_id", "serial", "serial_match"})
-_ALLOWLIST_FIELDS = frozenset(
-    {"entry_id", "match", "label", "added_by", "added_at"}
-)
+_ALLOWLIST_FIELDS = frozenset({"entry_id", "match", "label", "added_by", "added_at"})
 _EXCEPTION_FIELDS = frozenset(
     {"exception_id", "match", "reason", "created_by", "created_at", "expires_at"}
 )
-_REPORTING_FIELDS = frozenset(
-    {"report_allowed", "report_blocked", "report_present_at_start"}
-)
+_REPORTING_FIELDS = frozenset({"report_allowed", "report_blocked", "report_present_at_start"})
 _ENFORCEMENT_FIELDS = frozenset({"apply_to_present_devices"})
 
 
@@ -105,8 +101,7 @@ class IntentError(Exception):
         count = len(self.problems)
         detail = "\n".join(f"  - {p}" for p in self.problems)
         super().__init__(
-            f"usb_control payload rejected ({count} "
-            f"problem{'s' if count != 1 else ''}):\n{detail}"
+            f"usb_control payload rejected ({count} problem{'s' if count != 1 else ''}):\n{detail}"
         )
 
 
@@ -233,9 +228,7 @@ def _str(obj: dict[str, Any], key: str, where: str, problems: list[str]) -> str 
     return value
 
 
-def _parse_datetime(
-    raw: Any, key: str, where: str, problems: list[str]
-) -> dt.datetime | None:
+def _parse_datetime(raw: Any, key: str, where: str, problems: list[str]) -> dt.datetime | None:
     if not isinstance(raw, str):
         problems.append(f"{where}: {key!r} must be an RFC 3339 timestamp string")
         return None
@@ -256,9 +249,7 @@ def _parse_datetime(
     return parsed.astimezone(dt.timezone.utc)
 
 
-def _parse_match(
-    raw: Any, where: str, problems: list[str]
-) -> DeviceMatch | None:
+def _parse_match(raw: Any, where: str, problems: list[str]) -> DeviceMatch | None:
     if not isinstance(raw, dict):
         problems.append(f"{where}: 'match' must be an object")
         return None
@@ -269,8 +260,7 @@ def _parse_match(
     for name, value in (("vendor_id", vendor), ("product_id", product)):
         if not isinstance(value, str) or not HEX4_RE.match(value):
             problems.append(
-                f"{where}.match: {name!r} must be exactly 4 lowercase hex "
-                f"digits (got {value!r})"
+                f"{where}.match: {name!r} must be exactly 4 lowercase hex digits (got {value!r})"
             )
 
     serial_match = raw.get("serial_match")
@@ -281,9 +271,7 @@ def _parse_match(
         )
 
     serial = raw.get("serial")
-    if serial is not None and (
-        not isinstance(serial, str) or not SERIAL_RE.match(serial)
-    ):
+    if serial is not None and (not isinstance(serial, str) or not SERIAL_RE.match(serial)):
         problems.append(
             f"{where}.match: 'serial' contains characters that are not "
             f"permitted in a generated rule; must match {SERIAL_RE.pattern}"
@@ -323,10 +311,7 @@ def parse(payload: dict[str, Any], *, now: dt.datetime | None = None) -> UsbCont
     _reject_unknown(payload, _PAYLOAD_FIELDS, "payload", problems)
 
     if payload.get("schema") != SCHEMA_ID:
-        problems.append(
-            f"payload: 'schema' must be {SCHEMA_ID!r} "
-            f"(got {payload.get('schema')!r})"
-        )
+        problems.append(f"payload: 'schema' must be {SCHEMA_ID!r} (got {payload.get('schema')!r})")
 
     for name in _REQUIRED_PAYLOAD_FIELDS:
         if name not in payload:
@@ -334,9 +319,7 @@ def parse(payload: dict[str, Any], *, now: dt.datetime | None = None) -> UsbCont
 
     mode = payload.get("mode")
     if mode not in MODES:
-        problems.append(
-            f"payload: 'mode' must be one of {', '.join(MODES)} (got {mode!r})"
-        )
+        problems.append(f"payload: 'mode' must be one of {', '.join(MODES)} (got {mode!r})")
 
     # -- classes -----------------------------------------------------------
     protected = payload.get("protected_classes")
@@ -495,14 +478,10 @@ def parse(payload: dict[str, Any], *, now: dt.datetime | None = None) -> UsbCont
         if not isinstance(raw_enforcement, dict):
             problems.append("payload: 'enforcement' must be an object")
         else:
-            _reject_unknown(
-                raw_enforcement, _ENFORCEMENT_FIELDS, "enforcement", problems
-            )
+            _reject_unknown(raw_enforcement, _ENFORCEMENT_FIELDS, "enforcement", problems)
             value = raw_enforcement.get("apply_to_present_devices", True)
             if not isinstance(value, bool):
-                problems.append(
-                    "enforcement: 'apply_to_present_devices' must be true or false"
-                )
+                problems.append("enforcement: 'apply_to_present_devices' must be true or false")
             else:
                 apply_to_present = value
 

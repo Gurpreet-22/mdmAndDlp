@@ -32,7 +32,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 #: Default locations on Debian/Ubuntu.
 DEFAULT_RULES_PATH = "/etc/usbguard/rules.conf"
@@ -178,7 +178,7 @@ class Capabilities:
             gaps.append(f"writable {self.rules_path}")
         return tuple(gaps)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "usbguard_present": self.usbguard_present,
             "usbguard_version": self.usbguard_version,
@@ -193,7 +193,7 @@ class Capabilities:
         }
 
 
-def ipc_exposure(daemon_params: dict) -> tuple[str, ...]:
+def ipc_exposure(daemon_params: dict[str, Any]) -> tuple[str, ...]:
     """Non-root principals holding full USBGuard IPC access.
 
     Each entry can rewrite the policy at runtime, so a non-empty result means
@@ -221,8 +221,8 @@ class UsbState:
     rules_text: str
     rules_fingerprint: str | None
     loaded_rules: tuple[str, ...]
-    devices: tuple[dict, ...]
-    daemon_params: dict
+    devices: tuple[dict[str, Any], ...]
+    daemon_params: dict[str, Any]
     daemon_active: bool
     #: False when the daemon config could not be read at all. Tracked
     #: separately because an unreadable config and a clean one both yield no
@@ -234,7 +234,7 @@ class UsbState:
     def ipc_exposure(self) -> tuple[str, ...]:
         return ipc_exposure(self.daemon_params)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         exposure = self.ipc_exposure
         return {
             "rules_fingerprint": self.rules_fingerprint,
@@ -328,8 +328,7 @@ class UsbGuardSystem:
         if not caps.supported:
             raise HostError(
                 "capability_missing",
-                "host cannot enforce usb_control policy; missing: "
-                + ", ".join(caps.missing),
+                "host cannot enforce usb_control policy; missing: " + ", ".join(caps.missing),
             )
         return caps
 
@@ -345,9 +344,7 @@ class UsbGuardSystem:
         except FileNotFoundError:
             return ""
         except PermissionError as exc:
-            raise HostError(
-                "readback_failed", f"cannot read {self.rules_path}: {exc}"
-            ) from exc
+            raise HostError("readback_failed", f"cannot read {self.rules_path}: {exc}") from exc
 
     def loaded_rules(self) -> tuple[str, ...]:
         """Rules the daemon has actually loaded.
@@ -367,7 +364,7 @@ class UsbGuardSystem:
             rules.append(re.sub(r"^\d+:\s*", "", stripped))
         return tuple(rules)
 
-    def devices(self) -> tuple[dict, ...]:
+    def devices(self) -> tuple[dict[str, Any], ...]:
         """Live devices and the decision usbguard made about each.
 
         This is the authorisation state the kernel is enforcing, which is the
@@ -377,15 +374,14 @@ class UsbGuardSystem:
         if code != 0:
             return ()
 
-        found: list[dict] = []
+        found: list[dict[str, Any]] = []
         for line in out.splitlines():
             match = _DEVICE_LINE.match(line)
             if not match:
                 continue
-            entry: dict = {
+            entry: dict[str, Any] = {
                 "target": match.group("target"),
-                "usb_id": f"{match.group('vid').lower()}:"
-                f"{match.group('pid').lower()}",
+                "usb_id": f"{match.group('vid').lower()}:{match.group('pid').lower()}",
             }
             for key, pattern in _QUOTED.items():
                 hit = pattern.search(line)
@@ -403,7 +399,7 @@ class UsbGuardSystem:
             found.append(entry)
         return tuple(found)
 
-    def read_daemon_conf(self) -> tuple[dict, bool]:
+    def read_daemon_conf(self) -> tuple[dict[str, Any], bool]:
         """Return (settings, readable).
 
         The flag matters: enforcerd runs as root and can read the config, but
@@ -416,9 +412,9 @@ class UsbGuardSystem:
             os.access(self.daemon_conf_path, os.R_OK)
         )
 
-    def daemon_params(self) -> dict:
+    def daemon_params(self) -> dict[str, Any]:
         """The daemon settings that change what enforcement means."""
-        params: dict = {}
+        params: dict[str, Any] = {}
         try:
             text = Path(self.daemon_conf_path).read_text(encoding="utf-8")
         except (FileNotFoundError, PermissionError):
@@ -464,9 +460,7 @@ class UsbGuardSystem:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         except OSError as exc:
-            raise HostError(
-                "enforce_failed", f"cannot prepare {self.rules_path}: {exc}"
-            ) from exc
+            raise HostError("enforce_failed", f"cannot prepare {self.rules_path}: {exc}") from exc
         tmp_path = Path(tmp)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -475,9 +469,7 @@ class UsbGuardSystem:
             tmp_path.replace(path)
         except OSError as exc:
             tmp_path.unlink(missing_ok=True)
-            raise HostError(
-                "enforce_failed", f"cannot write {self.rules_path}: {exc}"
-            ) from exc
+            raise HostError("enforce_failed", f"cannot write {self.rules_path}: {exc}") from exc
 
     def validate_rules_file(self) -> None:
         """Ask usbguard's own parser to check the installed file, if present.
@@ -489,9 +481,7 @@ class UsbGuardSystem:
         """
         if self.which("usbguard-rule-parser") is None:
             return
-        code, out = self.runner(
-            ["usbguard-rule-parser", "-f", self.rules_path]
-        )
+        code, out = self.runner(["usbguard-rule-parser", "-f", self.rules_path])
         if code != 0:
             raise HostError(
                 "enforce_failed",
@@ -503,9 +493,7 @@ class UsbGuardSystem:
         self.runner(["systemctl", "enable", self.service])
         code, out = self.runner(["systemctl", "restart", self.service])
         if code != 0:
-            raise HostError(
-                "enforce_failed", f"could not restart {self.service}: {out[-300:]}"
-            )
+            raise HostError("enforce_failed", f"could not restart {self.service}: {out[-300:]}")
         if not self.daemon_active():
             raise HostError(
                 "enforce_failed",

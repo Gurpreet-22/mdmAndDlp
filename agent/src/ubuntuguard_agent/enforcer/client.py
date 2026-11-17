@@ -48,7 +48,7 @@ class EnforcerClient:
     socket_path: str = DEFAULT_SOCKET_PATH
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
-    def call(self, op: str, payload: dict | None = None, **extra: Any) -> dict:
+    def call(self, op: str, payload: dict[str, Any] | None = None, **extra: Any) -> dict[str, Any]:
         """Send one request and return the response.
 
         A fresh connection per request. enforcerd handles connections
@@ -74,8 +74,7 @@ class EnforcerClient:
         except FileNotFoundError:
             return self._error(
                 "enforcer_unavailable",
-                f"no enforcer socket at {self.socket_path}; is "
-                f"ubuntuguard-enforcerd running?",
+                f"no enforcer socket at {self.socket_path}; is ubuntuguard-enforcerd running?",
             )
         except PermissionError:
             return self._error(
@@ -84,9 +83,7 @@ class EnforcerClient:
                 f"user must be in the socket's group",
             )
         except (ConnectionError, OSError) as exc:
-            return self._error(
-                "enforcer_unavailable", f"cannot reach enforcerd: {exc}"
-            )
+            return self._error("enforcer_unavailable", f"cannot reach enforcerd: {exc}")
         except ValueError as exc:
             return self._error("enforcer_unavailable", f"malformed reply: {exc}")
 
@@ -101,15 +98,13 @@ class EnforcerClient:
         try:
             response = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            return self._error(
-                "enforcer_unavailable", f"reply was not valid JSON: {exc}"
-            )
+            return self._error("enforcer_unavailable", f"reply was not valid JSON: {exc}")
         if not isinstance(response, dict):
             return self._error("enforcer_unavailable", "reply was not an object")
         return response
 
     @staticmethod
-    def _error(reason_code: str, message: str) -> dict:
+    def _error(reason_code: str, message: str) -> dict[str, Any]:
         return {
             "status": "failed",
             "reason_code": reason_code,
@@ -118,23 +113,25 @@ class EnforcerClient:
 
     # -- the operation set -------------------------------------------------
 
-    def capabilities(self) -> dict:
+    def capabilities(self) -> dict[str, Any]:
         from . import ops
 
         return self.call(ops.OP_CAPABILITIES)
 
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         from . import ops
 
         return self.call(ops.OP_USB_GET_STATE)
 
-    def set_policy(self, policy: dict, *, policy_version: int | None = None) -> dict:
+    def set_policy(
+        self, policy: dict[str, Any], *, policy_version: int | None = None
+    ) -> dict[str, Any]:
         from . import ops
 
         extra = {} if policy_version is None else {"policy_version": policy_version}
         return self.call(ops.OP_USB_SET_POLICY, {"policy": policy}, **extra)
 
-    def rollback(self, snapshot_id: str) -> dict:
+    def rollback(self, snapshot_id: str) -> dict[str, Any]:
         from . import ops
 
         return self.call(ops.OP_USB_ROLLBACK, {"snapshot_id": snapshot_id})
