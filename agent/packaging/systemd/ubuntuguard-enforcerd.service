@@ -48,15 +48,40 @@ ProtectSystem=strict
 ReadWritePaths=/etc/usbguard /var/lib/ubuntuguard /run/ubuntuguard
 
 # RuntimeDirectory creates /run/ubuntuguard with the right owner before
-# ExecStart, and systemd removes it on stop, so a stale socket cannot outlive
-# the service. The daemon also clears a leftover socket itself, because a
-# machine that lost power does not get the clean shutdown path.
+# ExecStart. The daemon also clears a leftover socket itself, because a machine
+# that lost power never got the clean shutdown path.
 RuntimeDirectory=ubuntuguard
 RuntimeDirectoryMode=0750
 
-# Snapshots for rollback. Root-only: they contain the policy, which names the
-# authorised devices.
-StateDirectory=ubuntuguard
+# Ownership is not set here, because systemd has no RuntimeDirectoryUser or
+# RuntimeDirectoryGroup: a runtime directory belongs to the unit's User=, and
+# this unit has none because it is root. The daemon sets the directory to
+# root:ubuntuguard 0750 and the socket to 0660 itself, on start, which it has
+# to do anyway for the case where the directory already exists.
+
+# REQUIRED, and not a tuning choice. ubuntuguard-agent.service declares the
+# same RuntimeDirectory=ubuntuguard, and systemd deletes a runtime directory
+# when the unit owning it stops -- so restarting the agent would delete this
+# daemon's live socket out from under it, and restarting this one would strip
+# the directory the agent expects. `preserve` keeps it for as long as either
+# unit may want it, and it is cleared at boot regardless.
+RuntimeDirectoryPreserve=yes
+
+# Snapshots for rollback, in a subdirectory of the agent's state directory
+# rather than the directory itself.
+#
+# Deliberate, and the obvious alternative is a bug: declaring
+# StateDirectory=ubuntuguard here too would have systemd re-own
+# /var/lib/ubuntuguard to root and re-mode it on every start, and
+# ubuntuguard-agent.service creates that same directory as
+# ubuntuguard:ubuntuguard 0750. The agent would then be unable to write its
+# own state, which is a failure that would show up as policy being re-applied
+# on every heartbeat rather than as a permissions error.
+#
+# The nested path keeps the ownership question separate: the parent stays the
+# agent's, and this subdirectory is root-only because snapshots contain the
+# policy, which names the authorised devices.
+StateDirectory=ubuntuguard/enforcer
 StateDirectoryMode=0700
 
 ProtectHome=yes

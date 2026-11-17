@@ -56,6 +56,15 @@ CAPABILITY_EXEMPT: dict[str, str] = {
     "POST /api/v1/enroll": "a device has no identity until this call completes",
     "POST /api/v1/devices/me/heartbeat": "authenticated by the mTLS client certificate",
     "POST /api/v1/devices/me/certificate:renew": "authenticated by the certificate it replaces",
+    "GET /api/v1/devices/me/policies/{policy_type}": (
+        "authenticated by the mTLS client certificate; the subject is the "
+        "caller's own certificate rather than a path parameter, which is what "
+        "stops one device pulling another's policy"
+    ),
+    "POST /api/v1/devices/me/policy-status": (
+        "authenticated by the mTLS client certificate; a device may report "
+        "only on the policy it is actually under, checked in the handler"
+    ),
     # --- Public: an enrolling employee has no account ---------------------- #
     "GET /api/v1/installer": "public installer metadata; carries no secret",
     "GET /api/v1/installer/download": "public installer download; carries no secret",

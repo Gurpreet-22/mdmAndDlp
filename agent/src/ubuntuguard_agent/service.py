@@ -30,8 +30,9 @@ import logging
 import signal
 import threading
 from collections.abc import Callable
+from typing import Any
 
-from ubuntuguard_agent import __version__
+from ubuntuguard_agent import __version__, policy
 from ubuntuguard_agent.config import AgentConfig
 from ubuntuguard_agent.core.runtime import Runtime
 from ubuntuguard_agent.core.scheduler import Backoff, ClockWatch, jittered_interval
@@ -295,6 +296,32 @@ class HeartbeatTask:
                 "available_policies": len(hints.available_policies),
             },
         )
+
+        self._sync_policies(hints.available_policies)
+
+    def _sync_policies(self, advertised: tuple[dict[str, Any], ...]) -> None:
+        """Pull and apply anything newer than what this device already has.
+
+        Deliberately after the heartbeat has been acknowledged, and
+        deliberately unable to fail it. The heartbeat is this device's liveness
+        signal; if a policy cannot be applied the server needs to know the
+        laptop is still there, and raising here would turn an enforcement
+        problem into an apparently offline machine.
+
+        `sync_policies` already handles one policy failing without abandoning
+        the rest. The guard here is for the unanticipated: a missing enforcer
+        socket, a permission change, anything that would otherwise take the
+        heartbeat down with it.
+        """
+        if not advertised or self._client is None:
+            return
+        try:
+            for action in policy.sync_policies(
+                self._config, self._client, advertised, logger=self._log
+            ):
+                self._log.info("policy sync", extra={"action": action})
+        except Exception:  # noqa: BLE001 - see docstring
+            self._log.exception("policy synchronisation failed")
 
 
 class CertificateRenewalTask:

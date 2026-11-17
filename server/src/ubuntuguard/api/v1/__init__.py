@@ -10,7 +10,16 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ubuntuguard import problems
-from ubuntuguard.api.v1 import audit_log, auth, devices, employees, enrollment, installer, users
+from ubuntuguard.api.v1 import (
+    audit_log,
+    auth,
+    devices,
+    employees,
+    enrollment,
+    installer,
+    policies,
+    users,
+)
 
 
 def build_router() -> APIRouter:
@@ -32,6 +41,7 @@ def build_router() -> APIRouter:
     router.include_router(employees.router)
     router.include_router(enrollment.admin_router)
     router.include_router(devices.admin_router)
+    router.include_router(policies.admin_router)
     router.include_router(audit_log.router)
 
     # --- Device plane --------------------------------------------------- #
@@ -40,5 +50,9 @@ def build_router() -> APIRouter:
     router.include_router(enrollment.device_router)
     # Everything else on this plane requires the mTLS client certificate.
     router.include_router(devices.device_router)
+    # Policy pull and status reporting. Under /devices/me/ because that is the
+    # nginx location which verifies the client certificate and overwrites the
+    # identity headers; a device route outside it would not receive them.
+    router.include_router(policies.device_router)
 
     return router

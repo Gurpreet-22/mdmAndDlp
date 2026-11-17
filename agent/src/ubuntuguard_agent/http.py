@@ -326,6 +326,33 @@ class ServerClient:
         )
         return self._send(request, path=urlsplit(url).path, request_bytes=len(body))
 
+    def get_json(self, path: str) -> HttpResponse:
+        """GET a JSON document and return the response.
+
+        Same relative-path rule as `post_json`, and for the same reason: an
+        absolute URL would make `urljoin` discard the base, so a caller
+        passing a server-supplied string could be redirected to a
+        server-chosen host.
+
+        No query-string support, deliberately. Every GET this agent makes
+        identifies its subject by its client certificate or by a fixed path
+        segment, so a caller never needs to assemble one, and not having the
+        facility means nothing can accidentally interpolate into it.
+        """
+        if "://" in path:
+            raise ConfigError(f"path must be relative to the base URL, got {path!r}")
+        url = urljoin(self._base_url, path.lstrip("/"))
+        request = urllib.request.Request(  # noqa: S310 - scheme validated in __init__
+            url,
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+                "Connection": "close",
+            },
+        )
+        return self._send(request, path=urlsplit(url).path, request_bytes=0)
+
     def _send(
         self, request: urllib.request.Request, *, path: str, request_bytes: int
     ) -> HttpResponse:

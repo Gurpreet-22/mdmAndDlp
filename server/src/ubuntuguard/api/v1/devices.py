@@ -510,6 +510,11 @@ def heartbeat(
     )
     repositories.resolve_offline_incidents_for_device(session, row.id)
 
+    # Read before the commit below, inside the same transaction, so the
+    # advertised versions cannot be a snapshot from a different moment than
+    # the heartbeat they are returned with.
+    available = repositories.available_policies_for_device(session, device_id=row.id)
+
     renew_after: dt.datetime | None = None
     certificate = device.certificate.certificate if device.certificate else None
     if certificate is not None:
@@ -521,6 +526,9 @@ def heartbeat(
         heartbeat_seconds=HEARTBEAT_SECONDS.default,
         heartbeat_jitter_pct=HEARTBEAT_JITTER_PCT.default,
         certificate_renew_after=renew_after,
-        # Populated once the policy engine lands in Phase 4.
-        available_policies=[],
+        # Identifiers and versions only, never the policy itself. The agent
+        # compares these against what it has applied and pulls anything newer
+        # over its own authenticated request, so this response still cannot be
+        # used to push anything at a laptop.
+        available_policies=available,
     )

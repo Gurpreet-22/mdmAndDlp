@@ -54,6 +54,9 @@ MINIMUM_PYTHON="@MINIMUM_PYTHON@"
 
 # --- fixed layout, matching install.sh ------------------------------------- #
 SERVICE_NAME="ubuntuguard-agent"
+#: The root enforcer. Started by this installer alongside the agent; see
+#: stage_start for why it goes first and why it is unconditional.
+ENFORCER_NAME="ubuntuguard-enforcerd"
 AGENT_USER="ubuntuguard"
 AGENT_GROUP="ubuntuguard"
 VENV_DIR="/opt/ubuntuguard/venv"
@@ -568,6 +571,7 @@ stage_enroll() {
 
 stage_start() {
     if [[ "${DRY_RUN}" -eq 1 ]]; then
+        printf '[dry-run] systemctl start %s\n' "${ENFORCER_NAME}"
         printf '[dry-run] systemctl start %s\n' "${SERVICE_NAME}"
         return 0
     fi
@@ -575,6 +579,22 @@ stage_start() {
         log "not starting ${SERVICE_NAME}: the device is not enrolled, so it would idle"
         return 0
     fi
+
+    # The enforcer first, and unconditionally, unlike the agent below.
+    #
+    # Unconditional because it has no enrollment of its own: it answers a local
+    # socket and never talks to the network, so there is no state it could be
+    # idling without. First because the agent may apply a policy on its very
+    # first heartbeat, and a missing socket at that moment is reported as
+    # `enforcer_unavailable` -- accurate, but it would appear in the dashboard
+    # as a failure caused only by start-up ordering.
+    #
+    # Failure tolerated for the same reason as the agent's: an installer that
+    # aborts here leaves a machine enrolled but unmanaged, and a dashboard
+    # reporting `unsupported` beats a half-finished install.
+    log "starting ${ENFORCER_NAME}"
+    systemctl start "${ENFORCER_NAME}.service" || \
+        warn "could not start ${ENFORCER_NAME}; USB policy will report unsupported"
 
     log "starting ${SERVICE_NAME}"
     START_MARK="$(date '+%Y-%m-%d %H:%M:%S')"

@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import ipaddress
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
@@ -691,3 +691,233 @@ class CheckOfflineDevicesResponse(BaseModel):
     flagged_offline_count: int
     new_incidents_created: int
     device_ids: list[uuid.UUID]
+
+
+# --------------------------------------------------------------------------- #
+# Policies
+# --------------------------------------------------------------------------- #
+#
+# The request models here are `StrictModel`, so an unknown field is a 422
+# rather than something silently dropped. That matters more for policy than
+# anywhere else in this API: a request carrying `raw_usbguard_rule` or
+# `post_apply_command` is an attempt to turn declarative policy into remote
+# execution, and it should be refused loudly at the edge rather than ignored
+# and reported as success.
+
+
+class UsbDeviceMatch(StrictModel):
+    """One device matcher: a model, or a specific physical unit.
+
+    Mirrors `deviceMatch` in `schemas/policy.usb_control.v1.schema.json`. The
+    four-hex-digit constraint is not cosmetic -- these values are interpolated
+    into a USBGuard rule on the endpoint, and the pattern is what keeps them
+    incapable of carrying rule syntax.
+    """
+
+    vendor_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{4}$")] = Field(
+        description="Lowercase 4-digit hex vendor id, as usbguard reports it."
+    )
+    product_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{4}$")] = Field(
+        description="Lowercase 4-digit hex product id."
+    )
+    serial: Annotated[str, StringConstraints(max_length=128)] | None = Field(
+        default=None,
+        description="Serial as usbguard reports it, or null for devices with none.",
+    )
+    serial_match: Literal["exact", "any"] = Field(
+        default="exact",
+        description=(
+            "`exact` pins one physical stick and requires a serial. `any` "
+            "matches every unit of that model, which is weaker and the "
+            "dashboard should label it so."
+        ),
+    )
+
+
+class UsbAllowlistEntryRequest(StrictModel):
+    """A device an administrator is approving."""
+
+    match: UsbDeviceMatch
+    label: Annotated[str, StringConstraints(min_length=1, max_length=120)] = Field(
+        description='What this device is, e.g. "Finance SanDisk".'
+    )
+
+
+class UsbExceptionRequest(StrictModel):
+    """A time-bound grant for one device.
+
+    `reason` has a floor because a justification nobody has to write is a
+    justification that says "test". The expiry bound is checked in
+    `services.policy`, since a duration limit is not expressible in a field
+    constraint.
+    """
+
+    match: UsbDeviceMatch
+    reason: Annotated[str, StringConstraints(min_length=8, max_length=500)]
+    expires_in_hours: int = Field(
+        default=8, ge=1, le=24, description="Capped at 24 hours by USB_EXCEPTION_MAX_SECONDS."
+    )
+
+
+class SetUsbPolicyRequest(StrictModel):
+    """Create a new `usb_control` policy version and apply it to a scope.
+
+    There is no "edit": every change is a new immutable version. That is what
+    makes the agent's downgrade rejection meaningful, and it means the history
+    of what a laptop was under cannot be quietly rewritten.
+    """
+
+    mode: Literal["monitor_only", "allowlist_enforce", "block_all_storage"] = Field(
+        description=(
+            "`monitor_only` blocks nothing and is the safe first step on a new "
+            "fleet. `allowlist_enforce` blocks the protected classes except "
+            "approved devices. `block_all_storage` ignores the allowlist, "
+            "though unexpired exceptions still apply."
+        )
+    )
+    scope_kind: Literal["device", "fleet"] = Field(
+        default="device",
+        description=(
+            "`group` exists in the schema but nothing resolves it yet, so it is "
+            "not offered here rather than accepted and ignored."
+        ),
+    )
+    device_id: uuid.UUID | None = Field(
+        default=None, description="Required when scope_kind is `device`."
+    )
+    protected_classes: list[Literal["mass_storage", "image"]] | None = Field(
+        default=None,
+        description=(
+            "Defaults to mass_storage only. `image` is USB class 06, which is "
+            "what a phone presents in MTP mode; enabling it blocks phones."
+        ),
+    )
+    always_allow_classes: (
+        list[
+            Literal[
+                "hid",
+                "hub",
+                "audio",
+                "video",
+                "printer",
+                "network",
+                "smartcard",
+                "wireless",
+                "billboard",
+                "cdc",
+                "physical",
+                "vendor_specific",
+            ]
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description="Must include hid and hub, or the user loses their keyboard.",
+    )
+    allowlist: list[UsbAllowlistEntryRequest] = Field(default_factory=list, max_length=256)
+    exceptions: list[UsbExceptionRequest] = Field(default_factory=list, max_length=64)
+    apply_to_present_devices: bool = Field(
+        default=True,
+        description=(
+            "Whether the endpoint re-judges devices already plugged in. False "
+            "leaves a connected stick alone until it is unplugged."
+        ),
+    )
+
+
+class PolicySummary(BaseModel):
+    """A policy version, without its payload."""
+
+    policy_id: uuid.UUID
+    policy_type: str
+    version: int
+    scope_kind: str
+    scope_id: str
+    signing_key_id: str
+    payload_sha256: str
+    issued_at: dt.datetime
+    expires_at: dt.datetime | None
+    summary: str = Field(description="One-line description for a list view.")
+    created_at: dt.datetime
+
+
+class PolicyDetail(PolicySummary):
+    """A policy version with its payload decoded, for display only.
+
+    `payload` here is parsed JSON for the dashboard to render. The
+    authoritative form is the stored bytes the signature covers; this is never
+    used to re-sign or re-send.
+    """
+
+    payload: dict[str, Any]
+
+
+class DevicePolicyStatusResponse(BaseModel):
+    """What a device reported about applying a policy.
+
+    `verified_state` is what the agent read back from the operating system, not
+    what it set out to do. Without it, `applied` is a claim.
+    """
+
+    policy_id: uuid.UUID
+    policy_type: str
+    policy_version: int
+    status: Literal["pending", "applied", "failed", "unsupported", "rolled_back"]
+    reason_code: str | None
+    detail: str | None
+    reported_at: dt.datetime
+    verified_state: dict[str, Any] | None
+
+
+class DeviceUsbPolicyView(BaseModel):
+    """Everything the device page needs for its USB card."""
+
+    policy: PolicyDetail | None = Field(
+        default=None, description="The policy in force, or null if none is assigned."
+    )
+    status: DevicePolicyStatusResponse | None = Field(
+        default=None, description="The device's last report, or null if it has not reported."
+    )
+
+
+class ReportPolicyStatusRequest(StrictModel):
+    """A device reporting the outcome of applying a policy.
+
+    Deliberately narrow. A device may report what happened to a policy it was
+    given; it cannot create, modify or assign one, and nothing here is trusted
+    as a statement about any other device -- the identity comes from the mTLS
+    certificate, never from the body.
+    """
+
+    policy_id: uuid.UUID
+    status: Literal["applied", "failed", "unsupported", "rolled_back"]
+    reason_code: Annotated[str, StringConstraints(max_length=48)] | None = None
+    detail: Annotated[str, StringConstraints(max_length=512)] | None = None
+    verified_state: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "What the agent read back from the OS: the rules usbguard actually "
+            "loaded, the daemon parameters, and whether enforcement is "
+            "bypassable without root."
+        ),
+    )
+
+
+class PolicyEnvelopeResponse(BaseModel):
+    """The signed envelope, exactly as it was signed.
+
+    Not a `StrictModel` and not reshaped: this is passed through from the
+    stored columns so the bytes the device verifies are the bytes that were
+    signed.
+    """
+
+    envelope_version: int
+    policy_id: str
+    policy_version: int
+    policy_type: str
+    scope: dict[str, str]
+    issued_at: str
+    expires_at: str | None
+    payload_b64: str
+    payload_sha256: str
+    signature: dict[str, str]

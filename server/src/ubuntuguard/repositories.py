@@ -32,15 +32,19 @@ from ubuntuguard.constants import (
     REFRESH_TOKEN_TTL_SECONDS,
 )
 from ubuntuguard.models import (
+    POLICY_TYPES,
     AuthToken,
     Device,
     DeviceAssignment,
+    DevicePolicyStatus,
     Employee,
     EnrollmentAttempt,
     EnrollmentToken,
     Incident,
     IssuedCertificate,
     LoginAttempt,
+    Policy,
+    PolicyAssignment,
     User,
 )
 from ubuntuguard.security.tokens import IssuedToken, generate_session_token
@@ -1225,3 +1229,321 @@ def resolve_offline_incidents_for_device(
         inc.note = (inc.note or "") + f"\n[Auto-resolved] Device reconnected at {now.isoformat()}."
     if open_incidents:
         session.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Policies
+# --------------------------------------------------------------------------- #
+#
+# Policies are immutable. Nothing here updates `policies`; a change is always a
+# new row with a higher version, which is what makes the agent's downgrade
+# rejection meaningful and leaves a history nobody can quietly rewrite.
+#
+# Two reads carry the weight in this section:
+#
+# `next_policy_version` takes the version from a MAX over the existing rows
+# rather than counting them. Counting would reuse a number if a row were ever
+# removed, and a reused version is one the agent would refuse as a downgrade.
+#
+# `effective_policy_for_device` is where scope is resolved. A device-scoped
+# policy beats a fleet-scoped one, and within a scope the highest version wins.
+# The precedence is explicit in the query rather than left to insertion order,
+# because "which policy is this laptop actually under" is the question the
+# whole feature answers.
+
+
+def next_policy_version(
+    session: Session,
+    *,
+    policy_type: str,
+    scope_kind: str,
+    scope_id: str,
+) -> int:
+    """The next version for a policy type and scope. Starts at 1."""
+    current = session.scalar(
+        select(func.max(Policy.version)).where(
+            Policy.policy_type == policy_type,
+            Policy.scope_kind == scope_kind,
+            Policy.scope_id == scope_id,
+        )
+    )
+    return int(current or 0) + 1
+
+
+def create_policy(
+    session: Session,
+    *,
+    policy_id: uuid.UUID,
+    policy_type: str,
+    version: int,
+    scope_kind: str,
+    scope_id: str,
+    payload: bytes,
+    payload_sha256: str,
+    signature_b64: str,
+    signing_key_id: str,
+    issued_at: dt.datetime,
+    issued_at_text: str,
+    expires_at: dt.datetime | None,
+    expires_at_text: str | None,
+    created_by: uuid.UUID,
+) -> Policy:
+    """Store an already-signed policy.
+
+    `policy_id` is supplied rather than generated here because it is part of
+    the signing input: the signature covers the id, so the row must carry the
+    same one the envelope was signed with.
+
+    `payload` is the exact bytes that were signed. They are never re-serialized
+    on the way in or out.
+    """
+    row = Policy(
+        id=policy_id,
+        policy_type=policy_type,
+        version=version,
+        scope_kind=scope_kind,
+        scope_id=scope_id,
+        payload=payload,
+        payload_sha256=payload_sha256,
+        signature_b64=signature_b64,
+        signing_key_id=signing_key_id,
+        issued_at=issued_at,
+        issued_at_text=issued_at_text,
+        expires_at=expires_at,
+        expires_at_text=expires_at_text,
+        created_by=created_by,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def get_policy(session: Session, policy_id: uuid.UUID) -> Policy | None:
+    return session.get(Policy, policy_id)
+
+
+def list_policies(
+    session: Session,
+    *,
+    policy_type: str | None = None,
+    scope_kind: str | None = None,
+    scope_id: str | None = None,
+    limit: int = 100,
+) -> Sequence[Policy]:
+    query = select(Policy)
+    if policy_type is not None:
+        query = query.where(Policy.policy_type == policy_type)
+    if scope_kind is not None:
+        query = query.where(Policy.scope_kind == scope_kind)
+    if scope_id is not None:
+        query = query.where(Policy.scope_id == scope_id)
+    query = query.order_by(Policy.created_at.desc()).limit(limit)
+    return session.scalars(query).all()
+
+
+def assign_policy(
+    session: Session,
+    *,
+    policy_id: uuid.UUID,
+    device_id: uuid.UUID,
+    assigned_by: uuid.UUID,
+) -> PolicyAssignment:
+    """Attach a policy to one device, retiring any live assignment of the
+    same policy to it.
+
+    Re-assigning the same policy is treated as reviving the existing row
+    rather than inserting a second one, because `policy_assignments` is unique
+    on (policy_id, device_id) and a plain insert would fail on the retry a
+    flaky network produces.
+    """
+    existing = session.scalar(
+        select(PolicyAssignment).where(
+            PolicyAssignment.policy_id == policy_id,
+            PolicyAssignment.device_id == device_id,
+        )
+    )
+    now = dt.datetime.now(dt.UTC)
+    if existing is not None:
+        existing.unassigned_at = None
+        existing.assigned_at = now
+        existing.assigned_by = assigned_by
+        session.flush()
+        return existing
+
+    row = PolicyAssignment(
+        policy_id=policy_id,
+        device_id=device_id,
+        assigned_at=now,
+        assigned_by=assigned_by,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def unassign_policies_of_type(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+    policy_type: str,
+) -> int:
+    """Retire this device's live assignments for one policy type.
+
+    Called before assigning a replacement, so a device is never under two
+    versions of the same policy type at once. Returns how many were retired.
+
+    Marks `unassigned_at` rather than deleting: the history of what a laptop
+    was under, and when, is the part an auditor asks about.
+    """
+    live = session.scalars(
+        select(PolicyAssignment)
+        .join(Policy, Policy.id == PolicyAssignment.policy_id)
+        .where(
+            PolicyAssignment.device_id == device_id,
+            PolicyAssignment.unassigned_at.is_(None),
+            Policy.policy_type == policy_type,
+        )
+    ).all()
+    now = dt.datetime.now(dt.UTC)
+    for row in live:
+        row.unassigned_at = now
+    if live:
+        session.flush()
+    return len(live)
+
+
+def effective_policy_for_device(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+    policy_type: str,
+) -> Policy | None:
+    """The policy this device is actually under, or None.
+
+    Device-scoped assignment first, fleet-scoped as the fallback. Within
+    either, the highest version wins. A group scope is accepted by the schema
+    but not resolved here, because nothing creates one yet; when something
+    does, it belongs between the two.
+    """
+    assigned = session.scalar(
+        select(Policy)
+        .join(PolicyAssignment, PolicyAssignment.policy_id == Policy.id)
+        .where(
+            PolicyAssignment.device_id == device_id,
+            PolicyAssignment.unassigned_at.is_(None),
+            Policy.policy_type == policy_type,
+        )
+        .order_by(Policy.version.desc())
+        .limit(1)
+    )
+    if assigned is not None:
+        return assigned
+
+    return session.scalar(
+        select(Policy)
+        .where(
+            Policy.policy_type == policy_type,
+            Policy.scope_kind == "fleet",
+        )
+        .order_by(Policy.version.desc())
+        .limit(1)
+    )
+
+
+def available_policies_for_device(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+) -> list[dict[str, int | str]]:
+    """What the heartbeat advertises: one entry per policy type in force.
+
+    Deliberately only identifiers and a version, never the policy itself. The
+    heartbeat says what exists; the agent decides whether it needs it and pulls
+    it over a separate authenticated request. That split is why a heartbeat
+    response cannot be used to push anything at a laptop.
+    """
+    out: list[dict[str, int | str]] = []
+    for policy_type in POLICY_TYPES:
+        policy = effective_policy_for_device(
+            session, device_id=device_id, policy_type=policy_type
+        )
+        if policy is not None:
+            out.append(
+                {
+                    "policy_type": policy.policy_type,
+                    "policy_id": str(policy.id),
+                    "policy_version": policy.version,
+                }
+            )
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# What devices report back about applying a policy
+# --------------------------------------------------------------------------- #
+
+
+def record_policy_status(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+    policy_id: uuid.UUID,
+    status: str,
+    reason_code: str | None = None,
+    detail: str | None = None,
+    verified_state: dict[str, Any] | None = None,
+) -> DevicePolicyStatus:
+    """Record, or replace, what a device reports for one policy.
+
+    One row per (device, policy): the table is unique on that pair, and the
+    latest report is the one that matters. The previous report for the same
+    pair is of no interest once superseded -- the audit log carries the history
+    that is worth keeping.
+
+    `verified_state` is what the agent read back from the operating system, not
+    what it intended to do. A status of `applied` without it is a claim; with
+    it, it is evidence.
+    """
+    row = session.scalar(
+        select(DevicePolicyStatus).where(
+            DevicePolicyStatus.device_id == device_id,
+            DevicePolicyStatus.policy_id == policy_id,
+        )
+    )
+    now = dt.datetime.now(dt.UTC)
+    if row is None:
+        row = DevicePolicyStatus(device_id=device_id, policy_id=policy_id, status=status)
+        session.add(row)
+    row.status = status
+    row.reason_code = reason_code[:48] if reason_code else None
+    row.detail = detail[:512] if detail else None
+    row.verified_state = verified_state
+    row.reported_at = now
+    session.flush()
+    return row
+
+
+def get_policy_status(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+    policy_id: uuid.UUID,
+) -> DevicePolicyStatus | None:
+    return session.scalar(
+        select(DevicePolicyStatus).where(
+            DevicePolicyStatus.device_id == device_id,
+            DevicePolicyStatus.policy_id == policy_id,
+        )
+    )
+
+
+def policy_statuses_for_device(
+    session: Session,
+    *,
+    device_id: uuid.UUID,
+) -> Sequence[DevicePolicyStatus]:
+    return session.scalars(
+        select(DevicePolicyStatus)
+        .where(DevicePolicyStatus.device_id == device_id)
+        .order_by(DevicePolicyStatus.reported_at.desc())
+    ).all()

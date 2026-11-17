@@ -420,6 +420,57 @@ def write_policy_keys(path: Path, keys: tuple[PolicyPublicKey, ...]) -> None:
     path.chmod(0o644)
 
 
+def read_policy_keys(path: Path) -> tuple[PolicyPublicKey, ...]:
+    """Read back the keys pinned at enrollment.
+
+    The counterpart to `write_policy_keys`. These are the only keys a policy
+    signature is ever checked against: there is no fetch-on-demand and no
+    fallback, because retrieving a key in order to validate a document is how
+    a signature check becomes decoration.
+
+    A missing file is an error rather than an empty tuple. Empty would mean
+    "no key verifies", which `verify_envelope` would report as an unknown
+    key id -- true, but it would send someone looking at the envelope instead
+    of at the enrollment that never completed.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise EnrollmentError(
+            f"no pinned policy keys at {path}; this device has not completed "
+            f"enrollment, so no policy signature can be verified"
+        ) from exc
+    except OSError as exc:
+        raise EnrollmentError(f"cannot read {path}: {exc}") from exc
+
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise EnrollmentError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(document, dict):
+        raise EnrollmentError(f"{path} does not contain a JSON object")
+
+    entries = document.get("keys")
+    if not isinstance(entries, list) or not entries:
+        raise EnrollmentError(f"{path} contains no policy keys")
+
+    keys: list[PolicyPublicKey] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise EnrollmentError(f"{path}: a key entry is not an object")
+        try:
+            keys.append(
+                PolicyPublicKey(
+                    key_id=str(entry["key_id"]),
+                    alg=str(entry["alg"]),
+                    public_key_b64=str(entry["public_key_b64"]),
+                )
+            )
+        except KeyError as exc:
+            raise EnrollmentError(f"{path}: a key entry is missing {exc.args[0]!r}") from exc
+    return tuple(keys)
+
+
 # --------------------------------------------------------------------------- #
 # The sequence
 # --------------------------------------------------------------------------- #

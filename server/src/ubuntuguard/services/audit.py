@@ -125,6 +125,16 @@ ACTIONS = frozenset(
         "certificate_renewal_failed",
         "policy_created",
         "policy_assigned",
+        # A device reporting what it did with a policy it was given. Written
+        # against the device rather than a user: nobody logged in to cause it,
+        # and attributing it to an administrator would be a lie in this log.
+        #
+        # Worth its own action rather than folding into `policy_assigned`,
+        # because the two answer opposite questions. `policy_assigned` is what
+        # was intended; this is what the operating system on that laptop
+        # actually did about it, and the gap between them is the only thing
+        # that distinguishes enforcement from a dashboard that looks green.
+        "policy_status_reported",
         "usb_exception_created",
         "usb_exception_revoked",
         "incident_status_changed",

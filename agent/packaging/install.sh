@@ -22,6 +22,9 @@
 set -euo pipefail
 
 SERVICE_NAME="ubuntuguard-agent"
+#: The root half of the split. Separate unit, separate user (root), reached
+#: only over the Unix socket in RUN_DIR.
+ENFORCER_NAME="ubuntuguard-enforcerd"
 AGENT_USER="ubuntuguard"
 AGENT_GROUP="ubuntuguard"
 VENV_DIR="/opt/ubuntuguard/venv"
@@ -232,12 +235,29 @@ else
         "${CONFIG_DIR}/agent.yaml"
 fi
 
-# --- service --------------------------------------------------------------- #
+# --- services -------------------------------------------------------------- #
 
 log "installing the systemd unit"
 run install -m 0644 -o root -g root \
     "${SOURCE_DIR}/packaging/systemd/${SERVICE_NAME}.service" \
     "${UNIT_DIR}/${SERVICE_NAME}.service"
+
+# The root enforcer. A second unit because it runs as a different user to the
+# agent -- root rather than ${AGENT_USER} -- which is the privilege split the
+# threat model is built on: the component that talks to the network is not the
+# component that can change USB policy.
+#
+# Enabled, not started, exactly like the agent and for the same reason given
+# in the header: this script configures, it does not launch. The outer
+# installer starts both once enrollment has completed.
+#
+# Enabled regardless of whether usbguard is installed. With it absent the
+# enforcer answers `unsupported` and the dashboard shows that honestly, which
+# is the outcome worth having over a laptop that silently never enforces.
+log "installing the root enforcer unit"
+run install -m 0644 -o root -g root \
+    "${SOURCE_DIR}/packaging/systemd/${ENFORCER_NAME}.service" \
+    "${UNIT_DIR}/${ENFORCER_NAME}.service"
 
 run systemctl daemon-reload
 
@@ -246,6 +266,9 @@ if [[ "${DO_ENABLE}" -eq 1 ]]; then
     # back after a reboot.
     log "enabling ${SERVICE_NAME} for start at boot"
     run systemctl enable "${SERVICE_NAME}.service"
+
+    log "enabling ${ENFORCER_NAME} for start at boot"
+    run systemctl enable "${ENFORCER_NAME}.service"
 else
     log "skipping enable (--no-enable)"
 fi
