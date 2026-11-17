@@ -12,13 +12,17 @@ import type {
   DeviceDetail,
   DeviceListQuery,
   DeviceSummary,
+  DeviceUsbPolicyView,
   Employee,
   EnrollmentTokenResponse,
   InstallerInfoResponse,
   MeResponse,
+  PolicyDetail,
+  PolicySummary,
   Problem,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
+  SetUsbPolicyRequest,
   TokenResponse,
   UpdateEmployeeRequest,
   UserResponse,
@@ -440,5 +444,26 @@ export const api = {
     request<CheckOfflineDevicesResponse>("/api/v1/devices:check-offline", {
       method: "POST",
       body: { threshold_seconds: thresholdSeconds },
+    }),
+
+  // --- USB policy ---
+  //
+  // Two reads and one write. The write always creates a new version; there is
+  // no edit endpoint, because a policy is immutable once signed and the
+  // version is what lets an agent refuse a replayed older one.
+  deviceUsbPolicy: (deviceId: string) =>
+    request<DeviceUsbPolicyView>(
+      `/api/v1/policies/device/${encodeURIComponent(deviceId)}`,
+    ),
+
+  listPolicies: (policyType?: string, limit = 50) =>
+    request<PolicySummary[]>("/api/v1/policies", {
+      query: { policy_type: policyType, limit },
+    }),
+
+  setUsbPolicy: (body: SetUsbPolicyRequest) =>
+    request<PolicyDetail>("/api/v1/policies/usb-control", {
+      method: "POST",
+      body: body as unknown as Record<string, unknown>,
     }),
 };

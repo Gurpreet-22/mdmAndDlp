@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import ErrorBanner from "../components/ErrorBanner";
+import UsbPolicyCard from "../components/UsbPolicyCard";
 import { api } from "../api/client";
 import type {
   AssignDeviceRequest,
@@ -319,14 +320,7 @@ export default function DeviceDetailPage() {
           </p>
         </div>
 
-        <div className="card">
-          <h2>USB policy</h2>
-          <p className="muted">
-            No USB policy is assigned, because USB enforcement is not built yet. When it is,
-            a device without usbguard will report this capability as{" "}
-            <code>unsupported</code> rather than showing a false green.
-          </p>
-        </div>
+        <UsbPolicyCard deviceId={deviceId} />
       </div>
 
       {/* Assignment History */}

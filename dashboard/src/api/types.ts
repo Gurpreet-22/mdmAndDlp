@@ -348,3 +348,139 @@ export interface CheckOfflineDevicesResponse {
   new_incidents_created: number;
   device_ids: string[];
 }
+
+
+// --- USB policy ------------------------------------------------------------
+//
+// `UsbPolicyMode` is the one choice an administrator actually makes. The three
+// values are not a progression of strictness so much as three different
+// postures, and the dashboard should describe them rather than rank them:
+//
+//   monitor_only       nothing is blocked. The safe first step on a fleet
+//                      whose allowlist nobody has built yet.
+//   allowlist_enforce  the protected classes are blocked except for approved
+//                      devices.
+//   block_all_storage  the allowlist is ignored on purpose. Unexpired
+//                      exceptions still apply.
+export type UsbPolicyMode = "monitor_only" | "allowlist_enforce" | "block_all_storage";
+
+export type UsbProtectedClass = "mass_storage" | "image";
+
+export type UsbAlwaysAllowClass =
+  | "hid"
+  | "hub"
+  | "audio"
+  | "video"
+  | "printer"
+  | "network"
+  | "smartcard"
+  | "wireless"
+  | "billboard"
+  | "cdc"
+  | "physical"
+  | "vendor_specific";
+
+/** Matches `deviceMatch` in policy.usb_control.v1.schema.json. */
+export interface UsbDeviceMatch {
+  vendor_id: string;
+  product_id: string;
+  serial?: string | null;
+  serial_match: "exact" | "any";
+}
+
+export interface UsbAllowlistEntry {
+  entry_id: string;
+  match: UsbDeviceMatch;
+  label: string;
+  added_by: string;
+  added_at: string;
+}
+
+export interface UsbException {
+  exception_id: string;
+  match: UsbDeviceMatch;
+  reason: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** The decoded policy payload, for display. */
+export interface UsbControlPayload {
+  schema: string;
+  mode: UsbPolicyMode;
+  protected_classes: UsbProtectedClass[];
+  always_allow_classes: UsbAlwaysAllowClass[];
+  allowlist: UsbAllowlistEntry[];
+  exceptions: UsbException[];
+  reporting: {
+    report_allowed: boolean;
+    report_blocked: boolean;
+    report_present_at_start: boolean;
+  };
+  enforcement?: { apply_to_present_devices?: boolean };
+}
+
+export interface PolicySummary {
+  policy_id: string;
+  policy_type: string;
+  version: number;
+  scope_kind: string;
+  scope_id: string;
+  signing_key_id: string;
+  payload_sha256: string;
+  issued_at: string;
+  expires_at: string | null;
+  summary: string;
+  created_at: string;
+}
+
+export interface PolicyDetail extends PolicySummary {
+  payload: UsbControlPayload;
+}
+
+/**
+ * What the device reported back.
+ *
+ * `verified_state` is the agent's readback from the operating system, not what
+ * it set out to do. A status of `applied` without it would be a claim; with it
+ * the dashboard can show which rules usbguard actually loaded.
+ */
+export interface DevicePolicyStatus {
+  policy_id: string;
+  policy_type: string;
+  policy_version: number;
+  status: "pending" | "applied" | "failed" | "unsupported" | "rolled_back";
+  reason_code: string | null;
+  detail: string | null;
+  reported_at: string;
+  verified_state: {
+    rules_fingerprint?: string | null;
+    loaded_rule_count?: number;
+    loaded_rules?: string[];
+    daemon_params?: Record<string, string>;
+    daemon_active?: boolean;
+    daemon_conf_readable?: boolean;
+    /** Non-empty means a non-root user on that host can switch policy off. */
+    ipc_exposure?: string[];
+    /** null, not false, when the daemon config could not be read. */
+    enforcement_bypassable_without_root?: boolean | null;
+    foreign_rules?: string[];
+  } | null;
+}
+
+export interface DeviceUsbPolicyView {
+  policy: PolicyDetail | null;
+  status: DevicePolicyStatus | null;
+}
+
+export interface SetUsbPolicyRequest {
+  mode: UsbPolicyMode;
+  scope_kind?: "device" | "fleet";
+  device_id?: string | null;
+  protected_classes?: UsbProtectedClass[] | null;
+  always_allow_classes?: UsbAlwaysAllowClass[] | null;
+  allowlist?: { match: UsbDeviceMatch; label: string }[];
+  exceptions?: { match: UsbDeviceMatch; reason: string; expires_in_hours?: number }[];
+  apply_to_present_devices?: boolean;
+}
