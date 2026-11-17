@@ -165,6 +165,9 @@ def test_the_payload_is_exactly_the_allowlisted_file_set(
     assert "src/ubuntuguard_agent/cli.py" in names
     assert "src/ubuntuguard_agent/enrollment.py" in names
 
+    assert "packaging/systemd/ubuntuguard-enforcerd.service" in names
+    assert "src/ubuntuguard_agent/policy.py" in names
+    assert "src/ubuntuguard_agent/enforcer/service.py" in names
     # The build tooling itself has no business on an endpoint.
     assert "packaging/build_installer.py" not in names
     assert "packaging/installer-template.sh" not in names
@@ -587,3 +590,34 @@ def test_a_build_failure_is_a_message_not_a_traceback(
     assert exit_code == 1
     assert "must use https" in capsys.readouterr().err
     assert not list(tmp_path.iterdir()), "a failed build left files behind"
+
+
+def test_every_unit_install_sh_installs_is_in_the_payload(
+    built: tuple[Path, dict[str, object]],
+) -> None:
+    """The failure mode an explicit payload list invites.
+
+    `PAYLOAD_FILES` being hand-maintained is the right trade-off: a glob would
+    sweep in a stray PEM. The cost is that adding a unit to install.sh without
+    adding it here produces an installer that gets halfway -- the agent lands,
+    then the install aborts on a file the archive does not contain, on someone
+    else's laptop.
+
+    So rather than naming the units again here, this reads install.sh for the
+    units it actually installs and requires each to be packaged.
+    """
+    artifact, _ = built
+    names = _payload_names(artifact)
+    install_sh = (AGENT_DIR / "packaging" / "install.sh").read_text(encoding="utf-8")
+
+    unit_names = re.findall(
+        r'^(?:SERVICE_NAME|ENFORCER_NAME)="([a-z0-9-]+)"', install_sh, re.MULTILINE
+    )
+    assert unit_names, "install.sh declares no unit names; has it been restructured?"
+
+    for unit in unit_names:
+        member = f"packaging/systemd/{unit}.service"
+        assert member in names, (
+            f"install.sh installs {unit}.service but {member} is not in the "
+            f"payload, so the install would abort partway through"
+        )

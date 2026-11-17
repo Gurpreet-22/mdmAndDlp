@@ -95,6 +95,12 @@ PAYLOAD_FILES: tuple[str, ...] = (
     "packaging/install.sh",
     "packaging/uninstall.sh",
     "packaging/systemd/ubuntuguard-agent.service",
+    # The root enforcer's unit. install.sh installs both units, so omitting
+    # this one makes the install abort partway: the agent lands, then the
+    # install fails on a file the archive does not contain. An explicit list
+    # catches that at build time only if the list is kept in step with
+    # install.sh, which is the trade-off the comment above describes.
+    "packaging/systemd/ubuntuguard-enforcerd.service",
     "packaging/etc/agent.yaml.example",
 )
 
