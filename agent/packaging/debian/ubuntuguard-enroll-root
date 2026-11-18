@@ -95,10 +95,45 @@ if ! "${GETENT}" passwd "${AGENT_USER}" >/dev/null 2>&1; then
 fi
 
 # --- already enrolled? ----------------------------------------------------- #
-# The same test `identity.is_enrolled` makes: both halves present. Checked here
-# rather than in the launcher because ${STATE_DIR} is mode 0750 owned by the
-# service account, so an unprivileged process cannot see inside it.
-if [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ]; then
+# Checked here rather than in the launcher because ${STATE_DIR} is mode 0750
+# owned by the service account, so an unprivileged process cannot see inside
+# it.
+#
+# `identity.is_enrolled` asks only whether both files exist, which is the right
+# question for the agent -- it has a server to tell it if the certificate is no
+# good. It is the wrong question here, and the difference stranded a real
+# laptop: an orphaned key and certificate sat in ${STATE_DIR}/pki from an
+# attempt the server never completed, this script reported "already enrolled",
+# and the employee was left with no prompt, no reminder and nothing to act on.
+#
+# There is a guaranteed route into that state, so it is not an edge case. A
+# plain `apt remove` deliberately KEEPS ${STATE_DIR} so that a reinstall does
+# not need a new token, which means every reinstall-after-remove arrives with
+# key material already on disk.
+#
+# So "usable" is asked instead of "present": both halves, both non-empty, and
+# a certificate that parses and has not expired.
+KEY_PATH="${STATE_DIR}/pki/device.key"
+CRT_PATH="${STATE_DIR}/pki/device.crt"
+
+identity_present() {
+    [ -f "${KEY_PATH}" ] && [ -f "${CRT_PATH}" ]
+}
+
+identity_usable() {
+    identity_present || return 1
+    # Zero bytes is the signature of a run that died between creating a file
+    # and writing it.
+    [ -s "${KEY_PATH}" ] && [ -s "${CRT_PATH}" ] || return 1
+    if command -v openssl >/dev/null 2>&1; then
+        # -checkend 0: expired now. An expired certificate cannot complete a
+        # handshake, so it is not an identity however well-formed it is.
+        openssl x509 -in "${CRT_PATH}" -noout -checkend 0 >/dev/null 2>&1 || return 1
+    fi
+    return 0
+}
+
+if identity_usable; then
     echo "This laptop already has a device identity; not re-enrolling."
     # Whatever else is true, it does not need reminding. Reached when an
     # enrollment happened by another route -- the script installer, or an
@@ -110,6 +145,20 @@ if [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ];
     "${SYSTEMCTL}" start "${ENFORCER_NAME}.service" >/dev/null 2>&1 || true
     "${SYSTEMCTL}" start "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
     exit 10
+fi
+
+if identity_present; then
+    # Present but not usable. Moved aside rather than deleted: this is key
+    # material, deleting it is not reversible, and an administrator debugging
+    # why a laptop would not enrol will want to see what was there. The agent
+    # refuses to enrol while these two paths exist, so they have to move for
+    # enrollment to proceed at all.
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    echo "An unusable device identity is already present: empty, unparseable" >&2
+    echo "  or expired. Moving it aside as *.superseded-${stamp} and enrolling" >&2
+    echo "  fresh. The old files are kept for inspection." >&2
+    mv -f "${KEY_PATH}" "${KEY_PATH}.superseded-${stamp}" || true
+    mv -f "${CRT_PATH}" "${CRT_PATH}.superseded-${stamp}" || true
 fi
 
 # --- the token ------------------------------------------------------------- #

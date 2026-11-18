@@ -487,6 +487,58 @@ def test_an_already_enrolled_laptop_is_not_prompted(
     assert "/var/lib/ubuntuguard/pki/device.key" in postinst
 
 
+def test_enrollment_state_is_judged_on_a_usable_identity_not_a_present_one(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """File presence alone stranded a real laptop.
+
+    `identity.is_enrolled` asks only whether both files exist, which is right
+    for the agent: it has a server to tell it whether the certificate is any
+    good. It is wrong at install time. An orphaned key and certificate from an
+    attempt the server never completed made postinst report "already
+    enrolled", skip the prompt and delete the login reminder, leaving the
+    employee with no prompt, no reminder and no message.
+
+    There is a guaranteed route into that state, so it is not an edge case: a
+    plain `apt remove` deliberately keeps /var/lib/ubuntuguard so a reinstall
+    needs no new token, which means every reinstall-after-remove arrives with
+    key material already on disk.
+
+    Both scripts therefore test for a non-empty certificate that parses and
+    has not expired.
+    """
+    artifact, _ = built
+    for name, text in (
+        ("postinst", _tar_file(_control(artifact), "postinst").decode()),
+        ("helper", _tar_file(_data(artifact), builder.HELPER_PATH).decode()),
+    ):
+        expanded = _expand_shell_variables(text)
+        # -s rather than -f: a zero-byte file is the signature of a run that
+        # died between creating a file and writing it.
+        assert "-s " in expanded, name
+        assert "checkend 0" in expanded, f"{name} does not reject an expired certificate"
+
+
+def test_an_unusable_identity_is_moved_aside_and_not_deleted(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """The agent refuses to enrol while the two paths exist, so they must move
+    for enrollment to proceed. They are moved, never deleted: this is key
+    material, removing it is not reversible, and an administrator debugging a
+    laptop that would not enrol will want to see what was there."""
+    artifact, _ = built
+    helper = _expand_shell_variables(_tar_file(_data(artifact), builder.HELPER_PATH).decode())
+    assert "superseded-" in helper
+    moves = [line for line in helper.splitlines() if line.lstrip().startswith("mv -f")]
+    assert len(moves) >= 2, f"expected both halves moved aside, got {moves}"
+    destructive = [
+        line
+        for line in helper.splitlines()
+        if line.lstrip().startswith("rm ") and "device.key" in line
+    ]
+    assert destructive == [], f"the helper must not delete key material: {destructive}"
+
+
 def test_removal_takes_the_reminder_away(
     built: tuple[bytes, dict[str, object]], builder: ModuleType
 ) -> None:

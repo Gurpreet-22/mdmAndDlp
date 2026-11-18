@@ -231,8 +231,29 @@ seed_usbguard_baseline
 # Both are skipped when this laptop already has an identity, which is the
 # normal case on an upgrade: re-asking an enrolled laptop for a token would be
 # a prompt whose only correct answer is to close it.
+# "Usable", not merely "present". Both halves, both non-empty, and a
+# certificate that parses and has not expired.
+#
+# File presence alone was the first version of this check and it stranded a
+# real laptop: an orphaned key and certificate from an attempt the server never
+# completed made this script report "already enrolled", skip the prompt and
+# delete the login reminder, leaving the employee with nothing to act on.
+#
+# A plain `apt remove` deliberately KEEPS /var/lib/ubuntuguard so a reinstall
+# needs no new token, so every reinstall-after-remove arrives with key material
+# on disk. The weaker check would mis-handle all of them.
+#
+# When the answer cannot be established the prompt is shown. An unnecessary
+# prompt is a dialog someone closes; a suppressed one is a laptop that never
+# enrols and says nothing about why.
 already_enrolled() {
-    [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ]
+    key="${STATE_DIR}/pki/device.key"
+    crt="${STATE_DIR}/pki/device.crt"
+    [ -s "${key}" ] && [ -s "${crt}" ] || return 1
+    if command -v openssl >/dev/null 2>&1; then
+        openssl x509 -in "${crt}" -noout -checkend 0 >/dev/null 2>&1 || return 1
+    fi
+    return 0
 }
 
 if already_enrolled; then
