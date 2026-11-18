@@ -74,9 +74,11 @@ INSTALLER_MEDIA_TYPE = "application/x-shellscript"
 #: the system does not recognise as a package is a worse error message than it
 #: needs to be.
 #:
-#: It is NOT what makes the file installable from the desktop. Ubuntu's
-#: graphical store became a snap and lost local `.deb` support, so no media
-#: type will make a double-click install it.
+#: It is not on its own what makes the file installable from the desktop. On
+#: Ubuntu 22.04 gnome-software's dpkg plugin installs a local package through
+#: its "Software Install" handler, but the Archive Manager owns the default
+#: association, so a double-click opens the package as an archive regardless of
+#: what this header says.
 DEB_MEDIA_TYPE = "application/vnd.debian.binary-package"
 
 #: Upper bound on the artifact, as a sanity check before it is hashed on a
@@ -405,10 +407,11 @@ def deb_download(
     """Serve the `.deb`.
 
     The media type is the one dpkg and apt recognise, so a browser saves it as
-    a package rather than an unknown blob. It does not make the file
-    installable from the desktop: Ubuntu's graphical store cannot install a
-    locally downloaded package at all, which is why the enrollment page gives
-    an `apt install ./file` command rather than promising a double-click.
+    a package rather than an unknown blob. What it does not do is decide how the
+    file opens: the Archive Manager owns the default association for a `.deb`,
+    so the enrollment page walks the employee through "Open With -> Software
+    Install" and offers `apt install` as the fallback, rather than promising a
+    double-click.
 
     `Content-Disposition: attachment` for the same reason as the script - the
     file must land on disk to be installed - and the global no-store

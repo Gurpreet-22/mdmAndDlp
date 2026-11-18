@@ -136,7 +136,7 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 | D8 | Resume-from-sleep and network-return trigger an immediate check-in | **PARTIAL** — `ClockWatch` detects the clock step a suspend/resume produces and reports it; nothing yet reschedules the heartbeat on that signal, and there is no netlink watch |
 | D9 | `agentd` (unprivileged) / `enforcerd` (root) split over a Unix socket with `SO_PEERCRED` | **PARTIAL** — `enforcer/` implements the fixed four operations of §7, the socket at the path `AgentPaths` declares (mode `0660`, group `ubuntuguard`), and an `SO_PEERCRED` uid check applied *before the request is read*, so a refused peer cannot apply policy. 216 tests: reads bounded by size and deadline; requests field-allowlisted so one growing `rules_path` or `post_apply_command` is refused rather than ignored; rejections logged with opcode and uid, never payload; connections served one at a time, because two concurrent applies would interleave writes to `rules.conf`. `OP_USB_ROLLBACK` takes a `snapshot_id` and never rule text, with the rules coming from a root-only store, which is what stops a compromised `agentd` installing arbitrary USBGuard rules through root — the id is pattern-matched *and* confirmed to resolve inside the store. Every derived rule round-trips through the real `usbguard-rule-parser` byte-identically. **Not yet run as root on hardware**, and nothing wires `scheduler.py` to these ops yet, so the privilege boundary is tested but not exercised end to end |
 | D10 | Inventory collection discovered at runtime, nothing hardcoded | **PARTIAL** — the enrollment fingerprint is discovered, never assumed: os-release, kernel, arch, hashed machine-id, hashed physical MACs, heuristic virtualization. `dmi_product_uuid_hash` is `null` in production, deliberately — see the note below. Full `inventory.v1` reporting has no endpoint yet |
-| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — all four clauses now exist. `install.sh` installs **both** hardened units, `ubuntuguard-agent.service` and `ubuntuguard-enforcerd.service`, and the payload allowlist is asserted to carry both so a missing unit fails the build rather than the install. Three artifacts: `install.sh` for operators (45 packaging tests), the single-file self-extracting installer for employees (`build_installer.py` + `installer-template.sh`, 92 tests), and a `.deb` (`build_deb.py` + `packaging/debian/`, 46 tests) served from `/enroll` beside the script. `postinst` does not enrol, asserted over the built package; `purge` removes `/var/lib/ubuntuguard` including the device private key, while plain `remove` keeps it so a reinstall needs no new token. The `.deb` carries its Python dependencies as wheels and installs with `PIP_NO_INDEX`, so it needs no PyPI access, and `Depends: usbguard` is what makes apt pull in the thing the enforcer drives. **Not yet installed by `dpkg`/`apt` on a real machine**, and not yet run as root on hardware. Installation is one `sudo apt install ./…deb` and is **not** a double-click: Ubuntu's graphical store cannot install a locally downloaded package. See the note below, both on that and on the enrollment step |
+| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — all four clauses now exist. `install.sh` installs **both** hardened units, `ubuntuguard-agent.service` and `ubuntuguard-enforcerd.service`, and the payload allowlist is asserted to carry both so a missing unit fails the build rather than the install. Three artifacts: `install.sh` for operators (45 packaging tests), the single-file self-extracting installer for employees (`build_installer.py` + `installer-template.sh`, 92 tests), and a `.deb` (`build_deb.py` + `packaging/debian/`, 46 tests) served from `/enroll` beside the script. `postinst` does not enrol, asserted over the built package; `purge` removes `/var/lib/ubuntuguard` including the device private key, while plain `remove` keeps it so a reinstall needs no new token. The `.deb` carries its Python dependencies as wheels and installs with `PIP_NO_INDEX`, so it needs no PyPI access, and `Depends: usbguard` is what makes apt pull in the thing the enforcer drives. **Not yet installed by `dpkg`/`apt` on a real machine**, and not yet run as root on hardware. Installing it is graphical on 22.04 (Files → right-click → Open With → Software Install) but **not** a plain double-click, which the Archive Manager intercepts; `sudo apt install` is the release-independent fallback. See the note below, both on that and on the enrollment step |
 
 > **Note on D10 and clone detection.** `/sys/class/dmi/id/product_uuid` is mode
 > 0400 root-only, and the agent runs as an unprivileged user with an empty
@@ -173,27 +173,32 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 > password sitting in every employee's Downloads folder. The second step is the
 > feature, not a shortfall.
 >
-> **Neither artifact installs without a terminal, and the page no longer says
-> otherwise.** This was claimed and was wrong. Ubuntu's graphical store became
-> a snap and lost the ability to install a locally downloaded package with it;
-> on a stock desktop the only application registered for
-> `application/vnd.debian.binary-package` is the Archive Manager, and the
-> default handler is the Snap Store, which cannot install one. Double-clicking
-> a downloaded `.deb` shows its contents or does nothing. Found when the first
-> real employee-style attempt on a second laptop produced a file that "would
-> not open".
+> **How the package is installed, after getting it wrong twice.** The
+> enrollment page first said to double-click the download. That produces a file
+> that "would not open", which is what the first real attempt on a second
+> laptop hit: `file-roller` holds the default association for
+> `application/vnd.debian.binary-package`, so a double-click opens the package
+> as an archive.
 >
-> So the instruction is one `sudo apt install ./ubuntuguard-agent_*.deb`. What
-> the package still buys over the script is real: apt resolves `usbguard` and
-> the rest of the dependencies, dpkg's remove/purge split gives D11's key
-> handling for free, and enrollment afterwards is a window rather than a
-> terminal prompt. What it does not buy is a terminal-free install, and that
-> was the weakest part of the case for it.
+> It was then corrected too far, to "Ubuntu cannot install a downloaded package
+> graphically". That is wrong on the release this project targets first. Ubuntu
+> 22.04's `gnome-software` ships `libgs_plugin_dpkg.so` and
+> `gnome-software-local-file.desktop`, so **Files -> right-click -> Open With
+> Other Application -> Software Install** installs it, resolving dependencies
+> through PackageKit. The mistake was checking the development host, which runs
+> 26.04 and ships no handler at all, and generalising from it.
 >
-> A fleet can get the double-click back by shipping `gdebi` through
-> configuration management, which re-registers a handler for `.deb`. That is an
-> administrator's decision about their estate, not something this package can
-> arrange for itself.
+> It is release-dependent, so both routes are documented: the graphical one as
+> the instruction, and `sudo apt install ~/Downloads/<file>.deb` as the
+> fallback that always works. 24.04 could not install a local package from the
+> App Center when first released and was fixed in an update; 26.04 has no
+> handler. One further trap worth keeping: Firefox may hold a download in a
+> private temporary directory the installer cannot read, so the page says to
+> open it from Files rather than from the browser's download list.
+>
+> The script installer genuinely does require a terminal, because a browser
+> cannot mark a download executable and Nautilus will not run one on a
+> double-click.
 >
 > The two artifacts remain non-exclusive and answer different questions, as
 > originally argued: the script installs and enrols in one pass, and the `.deb`

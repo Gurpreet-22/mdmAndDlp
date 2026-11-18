@@ -27,16 +27,21 @@ import type { DebPackageInfoResponse, InstallerInfoResponse } from "../api/clien
  * Two downloads, offered in that order
  * ------------------------------------
  * The `.deb` is offered first because apt resolves usbguard for it and because
- * enrollment afterwards happens in a window. It is NOT offered as a
- * double-click install, which is what this page claimed until an employee
- * tried it: Ubuntu's graphical store became a snap and lost the ability to
- * install a locally downloaded package, so the only application registered for
- * a `.deb` on a stock desktop is the Archive Manager. One `apt install ./file`
- * is the honest instruction, and it is the only command in the process.
+ * enrollment afterwards happens in a window.
  *
- * The shell installer stays as the alternative. It needs a terminal too, so
- * neither artifact is terminal-free; what the package buys is dependency
- * resolution and a graphical enrollment step.
+ * How it is installed took two corrections. The page first said to
+ * double-click it, which produces a file that "would not open": the Archive
+ * Manager holds the default association for a `.deb`, so double-clicking opens
+ * it as an archive. The page was then corrected to say Ubuntu cannot install a
+ * downloaded package graphically at all, which is wrong on 22.04 -- it ships
+ * gnome-software's dpkg plugin and a "Software Install" handler, reachable
+ * through Files -> right-click -> Open With Other Application. It IS true on
+ * some releases: 24.04 could not do it when first released, and 26.04 ships no
+ * handler. So the graphical route is the instruction and `apt install` is
+ * offered as the fallback that always works.
+ *
+ * The shell installer stays as the alternative. It genuinely does need a
+ * terminal, because a browser cannot mark a download executable.
  *
  * The page is careful about one thing in particular: installing the package
  * does NOT enrol the laptop. Enrollment consumes a single-use token and creates
@@ -154,18 +159,23 @@ export default function EnrollPage() {
           )}
 
           {/*
-            The package first, because apt brings in usbguard by itself and
+            The package first, because apt resolves usbguard for it and
             because enrollment afterwards is a window rather than a terminal.
-            Two things it is NOT claimed to do, both learned the hard way:
+            Two corrections live in the wording here, both learned by getting
+            them wrong:
 
-            It does not install on a double-click. Ubuntu's graphical store
-            became a snap and dropped local .deb installation with it, so on a
-            stock desktop the only application registered for a .deb is the
-            Archive Manager and the default handler is the Snap Store, which
-            cannot install one. Double-clicking shows the package's contents
-            or nothing at all. The page used to promise a double-click; it was
-            wrong, and an employee following it got a file that "would not
-            open".
+            A plain double-click is not the instruction. On Ubuntu 22.04
+            gnome-software ships the dpkg plugin and a "Software Install"
+            handler, so a local package CAN be installed graphically -- but
+            the Archive Manager holds the default association for
+            application/vnd.debian.binary-package, so double-clicking opens
+            the package as an archive. The route that works is Files ->
+            right-click -> Open With Other Application -> Software Install.
+            This page first promised a double-click, which produced a file
+            that "would not open", and was then corrected too far in the other
+            direction by claiming Ubuntu cannot do it at all, which is only
+            true on some releases. The terminal command is given as the
+            fallback that always works rather than as the main instruction.
 
             It does not enrol. That is deliberate and is stated separately
             below rather than left for them to discover.
@@ -177,9 +187,10 @@ export default function EnrollPage() {
               </a>
               <p className="muted small">
                 Everything the agent needs is inside this file, so the install needs no
-                internet access of its own. Ubuntu cannot install a downloaded package
-                by double-clicking it, so there is one command to run — then the rest,
-                including entering your token, happens in a window.
+                internet access of its own. Open it from <strong>Files</strong> with{" "}
+                <strong>Software Install</strong> — a plain double-click usually opens
+                the Archive Manager instead. Entering your token afterwards happens in
+                a window.
               </p>
 
               <dl className="download-facts">
@@ -313,21 +324,40 @@ export default function EnrollPage() {
                   to your Downloads folder.
                 </li>
                 <li>
-                  <strong>Install it.</strong> Open a terminal in that folder and run:
-                  <br />
-                  <code>cd ~/Downloads</code>
-                  <br />
-                  <code>sudo apt install ./{deb.filename}</code>
+                  <strong>Install it.</strong> Open <strong>Files</strong> and go to
+                  your Downloads folder. Right-click the downloaded package, choose{" "}
+                  <strong>Open With Other Application</strong>, then{" "}
+                  <strong>Software Install</strong>, and press{" "}
+                  <strong>Install</strong>.
                   <br />
                   Enter your own login password when asked — that is Ubuntu asking
                   permission to install a system service, and it is <em>not</em> the
                   enrollment token.
                   <br />
                   <span className="muted small">
-                    Double-clicking the file does not work on Ubuntu: its graphical
-                    store cannot install a package you downloaded yourself, so it opens
-                    the file in the Archive Manager instead. This is the one command in
-                    the whole process.
+                    Open it from Files rather than from your browser's download list.
+                    Firefox can keep a download in a private temporary folder that the
+                    installer is not allowed to read, which fails with a confusing
+                    permissions error.
+                  </span>
+                  <br />
+                  <span className="muted small">
+                    A plain double-click usually opens the Archive Manager instead,
+                    because that is what Ubuntu associates with these files by default.
+                    To change that: right-click the file, Properties, Open With, pick
+                    Software Install, Set as default.
+                  </span>
+                </li>
+                <li>
+                  <strong>If that does not work</strong>, install it from a terminal
+                  instead:
+                  <br />
+                  <code>sudo apt install ~/Downloads/{deb.filename}</code>
+                  <br />
+                  <span className="muted small">
+                    Some Ubuntu releases cannot install a downloaded package
+                    graphically at all — 24.04 could not when it was first released,
+                    and 26.04 ships no handler for it. This command always works.
                   </span>
                 </li>
                 <li>
