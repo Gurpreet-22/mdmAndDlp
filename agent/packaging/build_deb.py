@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the double-clickable UbuntuGuard agent `.deb`.
+"""Build the UbuntuGuard agent `.deb`.
 
 Produces three files from one source tree:
 
@@ -43,7 +43,7 @@ Offline by construction
 -----------------------
 The runtime dependencies are downloaded at BUILD time into a wheelhouse inside
 the package, and `postinst` points pip at it with `PIP_NO_INDEX`. An employee
-installing from GNOME Software cannot see a pip failure, so "the download
+installing with one `apt install` command should not have to read pip
 worked but configuring it needed the internet" is a failure mode worth
 spending 6 MB to remove.
 

@@ -26,16 +26,22 @@ import type { DebPackageInfoResponse, InstallerInfoResponse } from "../api/clien
  *
  * Two downloads, offered in that order
  * ------------------------------------
- * The `.deb` is offered first because it needs no terminal: Ubuntu installs it
- * on a double-click, apt pulls in usbguard, and a desktop application does the
- * enrollment afterwards. The shell installer stays as the alternative, because
- * it does the whole job in one command for anyone already in a terminal and it
- * works where the package manager is busy or unavailable.
+ * The `.deb` is offered first because apt resolves usbguard for it and because
+ * enrollment afterwards happens in a window. It is NOT offered as a
+ * double-click install, which is what this page claimed until an employee
+ * tried it: Ubuntu's graphical store became a snap and lost the ability to
+ * install a locally downloaded package, so the only application registered for
+ * a `.deb` on a stock desktop is the Archive Manager. One `apt install ./file`
+ * is the honest instruction, and it is the only command in the process.
+ *
+ * The shell installer stays as the alternative. It needs a terminal too, so
+ * neither artifact is terminal-free; what the package buys is dependency
+ * resolution and a graphical enrollment step.
  *
  * The page is careful about one thing in particular: installing the package
  * does NOT enrol the laptop. Enrollment consumes a single-use token and creates
  * an auditable identity, so it needs a person behind it, and a package unpacked
- * by Ubuntu Software has nobody to ask. An employee who installs and then sees
+ * by apt has nobody to ask. An employee who installs and then sees
  * nothing happen would reasonably conclude it had failed, so the second step is
  * stated as a step rather than as a footnote.
  *
@@ -148,9 +154,21 @@ export default function EnrollPage() {
           )}
 
           {/*
-            The package first: no terminal, and apt brings in usbguard by
-            itself. The one thing it cannot do is enrol, so that is said here
-            rather than left for the employee to discover.
+            The package first, because apt brings in usbguard by itself and
+            because enrollment afterwards is a window rather than a terminal.
+            Two things it is NOT claimed to do, both learned the hard way:
+
+            It does not install on a double-click. Ubuntu's graphical store
+            became a snap and dropped local .deb installation with it, so on a
+            stock desktop the only application registered for a .deb is the
+            Archive Manager and the default handler is the Snap Store, which
+            cannot install one. Double-clicking shows the package's contents
+            or nothing at all. The page used to promise a double-click; it was
+            wrong, and an employee following it got a file that "would not
+            open".
+
+            It does not enrol. That is deliberate and is stated separately
+            below rather than left for them to discover.
           */}
           {deb && (
             <>
@@ -158,9 +176,10 @@ export default function EnrollPage() {
                 Download for Ubuntu ({formatSize(deb.size_bytes)})
               </a>
               <p className="muted small">
-                Double-click the downloaded file and Ubuntu installs it. Everything it
-                needs comes with it or is fetched by Ubuntu automatically — there is
-                nothing to type.
+                Everything the agent needs is inside this file, so the install needs no
+                internet access of its own. Ubuntu cannot install a downloaded package
+                by double-clicking it, so there is one command to run — then the rest,
+                including entering your token, happens in a window.
               </p>
 
               <dl className="download-facts">
@@ -282,7 +301,7 @@ export default function EnrollPage() {
 
           {deb && (
             <>
-              <h3 className="small-head">Using the Ubuntu package (no terminal)</h3>
+              <h3 className="small-head">Using the Ubuntu package (recommended)</h3>
               <ol className="steps numbered">
                 <li>
                   <strong>Ask your administrator for an enrollment token.</strong> It is a
@@ -294,10 +313,22 @@ export default function EnrollPage() {
                   to your Downloads folder.
                 </li>
                 <li>
-                  <strong>Double-click the downloaded file.</strong> Ubuntu Software opens
-                  and offers to install it. Press Install and enter your own login
-                  password when asked — that is Ubuntu asking permission to install a
-                  system service, and it is <em>not</em> the enrollment token.
+                  <strong>Install it.</strong> Open a terminal in that folder and run:
+                  <br />
+                  <code>cd ~/Downloads</code>
+                  <br />
+                  <code>sudo apt install ./{deb.filename}</code>
+                  <br />
+                  Enter your own login password when asked — that is Ubuntu asking
+                  permission to install a system service, and it is <em>not</em> the
+                  enrollment token.
+                  <br />
+                  <span className="muted small">
+                    Double-clicking the file does not work on Ubuntu: its graphical
+                    store cannot install a package you downloaded yourself, so it opens
+                    the file in the Archive Manager instead. This is the one command in
+                    the whole process.
+                  </span>
                 </li>
                 <li>
                   <strong>Open “Enrol this laptop with UbuntuGuard”</strong> from your

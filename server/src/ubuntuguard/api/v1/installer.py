@@ -69,10 +69,14 @@ DEB_MANIFEST_SCHEMA = "ubuntuguard.deb.v1"
 #: base64 in a tab is not the intended experience.
 INSTALLER_MEDIA_TYPE = "application/x-shellscript"
 
-#: The media type dpkg, apt and GNOME Software recognise. Getting this wrong is
-#: not cosmetic: a `.deb` served as `application/octet-stream` is saved as an
-#: unknown file, and double-clicking it does nothing - which is the entire
-#: feature.
+#: The media type dpkg and apt recognise. Served as `application/octet-stream`
+#: a browser saves it as an unknown blob, and `apt install ./file` on something
+#: the system does not recognise as a package is a worse error message than it
+#: needs to be.
+#:
+#: It is NOT what makes the file installable from the desktop. Ubuntu's
+#: graphical store became a snap and lost local `.deb` support, so no media
+#: type will make a double-click install it.
 DEB_MEDIA_TYPE = "application/vnd.debian.binary-package"
 
 #: Upper bound on the artifact, as a sanity check before it is hashed on a
@@ -352,7 +356,7 @@ def _refuse_a_package_that_claims_to_enrol(manifest: dict[str, Any]) -> bool:
 def deb_info(
     settings: Settings = Depends(get_settings),
 ) -> DebPackageInfoResponse:
-    """What the enrollment page needs to offer the double-click download.
+    """What the enrollment page needs to offer the package download.
 
     503 when no `.deb` is published, independently of the script: a server that
     has only built the script keeps serving it, and the page can offer one
@@ -400,10 +404,11 @@ def deb_download(
 ) -> FileResponse:
     """Serve the `.deb`.
 
-    The media type is the one dpkg, apt and GNOME Software recognise, which is
-    load-bearing rather than cosmetic: served as `application/octet-stream` the
-    file is saved as an unknown blob and double-clicking it does nothing, which
-    is the one thing this artifact exists to do.
+    The media type is the one dpkg and apt recognise, so a browser saves it as
+    a package rather than an unknown blob. It does not make the file
+    installable from the desktop: Ubuntu's graphical store cannot install a
+    locally downloaded package at all, which is why the enrollment page gives
+    an `apt install ./file` command rather than promising a double-click.
 
     `Content-Disposition: attachment` for the same reason as the script - the
     file must land on disk to be installed - and the global no-store

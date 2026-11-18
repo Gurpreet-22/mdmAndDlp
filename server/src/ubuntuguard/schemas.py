@@ -283,12 +283,12 @@ class InstallerInfoResponse(BaseModel):
 
 
 class DebPackageInfoResponse(BaseModel):
-    """Metadata for the double-clickable `.deb`. Public.
+    """Metadata for the agent `.deb`. Public.
 
     A second artifact beside the shell installer, not a replacement for it. The
     two answer different questions: the script installs and prompts for a token
     in one command, which suits an employee already in a terminal, while the
-    `.deb` is what a browser and GNOME Software can open, and what
+    `.deb` is what apt can resolve dependencies for, and what
     configuration management can push to a fleet.
 
     `enrols_on_install` is carried as a field rather than left to prose because
