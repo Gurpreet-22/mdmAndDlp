@@ -136,7 +136,7 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 | D8 | Resume-from-sleep and network-return trigger an immediate check-in | **PARTIAL** — `ClockWatch` detects the clock step a suspend/resume produces and reports it; nothing yet reschedules the heartbeat on that signal, and there is no netlink watch |
 | D9 | `agentd` (unprivileged) / `enforcerd` (root) split over a Unix socket with `SO_PEERCRED` | **PARTIAL** — `enforcer/` implements the fixed four operations of §7, the socket at the path `AgentPaths` declares (mode `0660`, group `ubuntuguard`), and an `SO_PEERCRED` uid check applied *before the request is read*, so a refused peer cannot apply policy. 216 tests: reads bounded by size and deadline; requests field-allowlisted so one growing `rules_path` or `post_apply_command` is refused rather than ignored; rejections logged with opcode and uid, never payload; connections served one at a time, because two concurrent applies would interleave writes to `rules.conf`. `OP_USB_ROLLBACK` takes a `snapshot_id` and never rule text, with the rules coming from a root-only store, which is what stops a compromised `agentd` installing arbitrary USBGuard rules through root — the id is pattern-matched *and* confirmed to resolve inside the store. Every derived rule round-trips through the real `usbguard-rule-parser` byte-identically. **Not yet run as root on hardware**, and nothing wires `scheduler.py` to these ops yet, so the privilege boundary is tested but not exercised end to end |
 | D10 | Inventory collection discovered at runtime, nothing hardcoded | **PARTIAL** — the enrollment fingerprint is discovered, never assumed: os-release, kernel, arch, hashed machine-id, hashed physical MACs, heuristic virtualization. `dmi_product_uuid_hash` is `null` in production, deliberately — see the note below. Full `inventory.v1` reporting has no endpoint yet |
-| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — `install.sh` and one hardened systemd unit, asserted by 45 packaging tests, plus a single-file self-extracting installer for employees (`packaging/build_installer.py` + `installer-template.sh`, 92 tests) served from `/enroll`. `install.sh` still does not enrol; the employee installer performs enrollment as its own separate, reported step with a token the employee types. No `.deb`. The second (root) unit now exists as `packaging/systemd/ubuntuguard-enforcerd.service`, hardened the same way and passing `systemd-analyze verify`, but it is not yet installed by `install.sh` and no packaging test asserts it. See the note below on why a `.deb` is not the artifact for this workflow |
+| D11 | `.deb` package, two systemd units, `postinst` does not enroll, `purge` removes keys | **PARTIAL** — all four clauses now exist. `install.sh` installs **both** hardened units, `ubuntuguard-agent.service` and `ubuntuguard-enforcerd.service`, and the payload allowlist is asserted to carry both so a missing unit fails the build rather than the install. Three artifacts: `install.sh` for operators (45 packaging tests), the single-file self-extracting installer for employees (`build_installer.py` + `installer-template.sh`, 92 tests), and a `.deb` (`build_deb.py` + `packaging/debian/`, 46 tests) served from `/enroll` beside the script. `postinst` does not enrol, asserted over the built package; `purge` removes `/var/lib/ubuntuguard` including the device private key, while plain `remove` keeps it so a reinstall needs no new token. The `.deb` carries its Python dependencies as wheels and installs with `PIP_NO_INDEX`, so it needs no PyPI access, and `Depends: usbguard` is what makes apt pull in the thing the enforcer drives. **Not yet installed by `dpkg`/`apt` on a real machine**, and not yet run as root on hardware. See the note below on the enrollment step, which is the part a `.deb` cannot do by itself |
 
 > **Note on D10 and clone detection.** `/sys/class/dmi/id/product_uuid` is mode
 > 0400 root-only, and the agent runs as an unprivileged user with an empty
@@ -147,25 +147,51 @@ foundation had shipped and nobody updated the table. It is now descriptive.
 > fixed: collecting it would mean weakening the systemd hardening, which is a
 > worse trade. Reading it is a candidate job for the Phase 7 root enforcer.
 
-> **Note on D11 and why the employee artifact is a script, not a `.deb`.** A
-> `.deb` remains the right long-term packaging and is still open. It is not the
-> right artifact for the employee enrollment workflow, for one specific reason:
-> D11's own constraint is that `postinst` must not enrol, and a `.deb` opened
-> from a browser is handled by GNOME Software, which gives the employee no
-> terminal in which to type a token. They would install successfully and then be
-> stuck exactly where they started. A script can install and then prompt, in one
-> command, which is the workflow that was asked for. The two are not exclusive:
-> a `.deb` for fleet deployment via configuration management and a script for
-> self-service enrollment answer different questions, and the `.deb` would
-> reuse the same `install.sh`.
+> **Note on D11 and how the `.deb` prompts for a token.** The original
+> objection to a `.deb` for the employee workflow was specific and correct as
+> far as it went: `postinst` must not enrol, and a `.deb` opened from a browser
+> is handled by GNOME Software, which gives the employee no terminal in which
+> to type a token. They would install successfully and then be stuck exactly
+> where they started.
 >
-> The employee installer ships SHA-256 integrity verification — the embedded
+> What that argument establishes is that the prompt cannot be part of the
+> install. It does not establish that the prompt must be a terminal. The
+> package ships a desktop application, `ubuntuguard-enroll`, which the employee
+> opens afterwards and pastes the token into: `zenity` collects it, `pkexec`
+> authorises, and a root helper hands it to the agent on **stdin** and starts
+> the two services. `postinst` still does not enrol. The token still never
+> reaches a command line, a log or a disk, which is the property the agent's
+> deliberate lack of a `--token` option exists to protect, and the helper
+> refuses arguments outright so the polkit action it is reached through has no
+> input other than the token itself.
+>
+> **This is not automatic enrollment, and no packaging could make it so.**
+> Enrolling without a person means a credential the artifact already holds, and
+> an artifact published for every employee to download holds nothing secret.
+> The alternative — one shared enrollment secret baked into the package — would
+> turn a single-use, auditable, per-device token into a permanent fleet-wide
+> password sitting in every employee's Downloads folder. The second step is the
+> feature, not a shortfall.
+>
+> The two artifacts remain non-exclusive and answer different questions, as
+> originally argued: the script installs and enrols in one command for someone
+> already in a terminal, and the `.deb` is what a browser, GNOME Software and
+> configuration management can open. The `.deb` reuses `install.sh` exactly as
+> predicted, invoking it with `bash` and pointing pip at a bundled wheelhouse
+> through `PIP_NO_INDEX`, so there is one description of what an installed agent
+> looks like and the existing packaging tests still describe it.
+>
+> Both employee artifacts ship SHA-256 integrity verification — the embedded
 > agent is checked against a digest in the script's own header before anything
-> is unpacked, and the whole-file digest is published on the enrollment page.
+> is unpacked, and each whole-file digest is published on the enrollment page
+> and recomputed by the server from the bytes it is about to serve.
 > **It is not package signing.** A signature needs a release signing key, and
 > the only key this project has is the Ed25519 policy signing key, which must
 > not be reused for a second purpose. A separate release key is a production
-> requirement and is recorded in `agent/SECURITY-FINDINGS.md` item 9.
+> requirement and is recorded in `agent/SECURITY-FINDINGS.md` item 9. For the
+> `.deb` this is visible to the employee: apt and GNOME Software will report
+> the package as coming from an unknown source, which is accurate, and the
+> enrollment page says so rather than letting it read as a fault.
 
 ### E. USB data-loss prevention — Phase 5, the actual product
 
