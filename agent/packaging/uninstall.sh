@@ -18,6 +18,11 @@
 set -euo pipefail
 
 SERVICE_NAME="ubuntuguard-agent"
+#: The root half of the split, which install.sh also installs. This script
+#: predated the enforcer and removed only the agent's unit, which left a
+#: root-running service and an enabled symlink behind after an "uninstall" -
+#: and on reboot systemd would start an enforcer whose code had been deleted.
+ENFORCER_NAME="ubuntuguard-enforcerd"
 AGENT_USER="ubuntuguard"
 AGENT_GROUP="ubuntuguard"
 VENV_PARENT="/opt/ubuntuguard"
@@ -64,15 +69,22 @@ fi
 # abort the rest of the teardown under `set -e`.
 
 if command -v systemctl >/dev/null 2>&1; then
-    log "stopping and disabling ${SERVICE_NAME}"
-    run systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
-    run systemctl disable "${SERVICE_NAME}.service" 2>/dev/null || true
+    # The enforcer first. It owns the Unix socket the agent connects to, so
+    # stopping the privileged half before the half that talks to it avoids a
+    # window where the agent retries a socket that is going away.
+    for unit in "${ENFORCER_NAME}" "${SERVICE_NAME}"; do
+        log "stopping and disabling ${unit}"
+        run systemctl stop "${unit}.service" 2>/dev/null || true
+        run systemctl disable "${unit}.service" 2>/dev/null || true
 
-    if [[ -f "${UNIT_DIR}/${SERVICE_NAME}.service" ]]; then
-        log "removing the systemd unit"
-        run rm -f "${UNIT_DIR}/${SERVICE_NAME}.service"
-    fi
+        if [[ -f "${UNIT_DIR}/${unit}.service" ]]; then
+            log "removing the ${unit} systemd unit"
+            run rm -f "${UNIT_DIR}/${unit}.service"
+        fi
+    done
+
     run systemctl daemon-reload || true
+    run systemctl reset-failed "${ENFORCER_NAME}.service" 2>/dev/null || true
     run systemctl reset-failed "${SERVICE_NAME}.service" 2>/dev/null || true
 else
     log "systemctl not found; skipping the service teardown"
