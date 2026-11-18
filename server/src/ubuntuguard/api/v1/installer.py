@@ -45,7 +45,7 @@ from fastapi.responses import FileResponse
 from ubuntuguard import problems
 from ubuntuguard.api.deps import get_settings
 from ubuntuguard.config import Settings
-from ubuntuguard.schemas import InstallerInfoResponse
+from ubuntuguard.schemas import DebPackageInfoResponse, InstallerInfoResponse
 
 router = APIRouter(prefix="/installer", tags=["installer"])
 
@@ -57,10 +57,23 @@ MANIFEST_FILENAME = "installer-manifest.json"
 #: publishing a digest for the wrong file.
 MANIFEST_SCHEMA = "ubuntuguard.installer.v1"
 
+#: The `.deb`'s manifest and schema, written by build_deb.py into the same
+#: directory. A separate manifest rather than a second section of one file, so
+#: that publishing either artifact is independent: a server with only the
+#: script answers 503 on the `.deb` routes and keeps serving the script.
+DEB_MANIFEST_FILENAME = "deb-manifest.json"
+DEB_MANIFEST_SCHEMA = "ubuntuguard.deb.v1"
+
 #: Served as a download rather than rendered. A shell script with a text content
 #: type is something a browser may display, and an employee reading 150 KB of
 #: base64 in a tab is not the intended experience.
 INSTALLER_MEDIA_TYPE = "application/x-shellscript"
+
+#: The media type dpkg, apt and GNOME Software recognise. Getting this wrong is
+#: not cosmetic: a `.deb` served as `application/octet-stream` is saved as an
+#: unknown file, and double-clicking it does nothing - which is the entire
+#: feature.
+DEB_MEDIA_TYPE = "application/vnd.debian.binary-package"
 
 #: Upper bound on the artifact, as a sanity check before it is hashed on a
 #: request. The real one is ~160 KB; 32 MB is loose enough for a future build
@@ -92,8 +105,18 @@ def _resolve_installer_dir(settings: Settings) -> Path:
     return directory
 
 
-def _read_manifest(directory: Path) -> dict[str, Any]:
-    path = directory / MANIFEST_FILENAME
+def _read_manifest(
+    directory: Path,
+    filename: str = MANIFEST_FILENAME,
+    schema: str = MANIFEST_SCHEMA,
+) -> dict[str, Any]:
+    """Read and validate one of the two manifests.
+
+    Parameterised rather than duplicated for the `.deb`, so there is one
+    description of what a trustworthy manifest looks like. The defaults keep
+    the script installer's call sites unchanged.
+    """
+    path = directory / filename
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -110,7 +133,7 @@ def _read_manifest(directory: Path) -> dict[str, Any]:
 
     if not isinstance(manifest, dict):
         raise _unavailable("The agent installer manifest on this server is malformed.")
-    if manifest.get("schema") != MANIFEST_SCHEMA:
+    if manifest.get("schema") != schema:
         raise _unavailable(
             "The agent installer manifest on this server has an unrecognised schema."
         )
@@ -189,6 +212,15 @@ def _string(manifest: dict[str, Any], key: str) -> str:
     return value
 
 
+def _int(manifest: dict[str, Any], key: str) -> int:
+    value = manifest.get(key)
+    # `bool` is a subclass of `int`, and a manifest with `true` where a size
+    # belongs is malformed rather than a size of one.
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise _unavailable(f"The agent installer manifest field {key!r} is malformed.")
+    return value
+
+
 @router.get("", response_model=InstallerInfoResponse)
 def installer_info(
     settings: Settings = Depends(get_settings),
@@ -264,4 +296,129 @@ def installer_download(
             # build after an upgrade, which is why the global Cache-Control
             # from SecurityHeadersMiddleware (no-store) is left in place.
         },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The `.deb`
+# --------------------------------------------------------------------------- #
+# A second artifact, published from the same directory and reached by the same
+# unauthenticated employee. Everything the module docstring says about why the
+# script's routes need no credential applies unchanged: the package carries no
+# private key, no certificate and no enrollment token, and
+# `agent/tests/test_deb_build.py` asserts their absence from the built bytes.
+#
+# Why a `.deb` exists at all, given that `docs/04-feature-list.md` recorded the
+# employee artifact as a script: the documented objection was that `postinst`
+# must not enrol and a package opened from a browser gives the employee no
+# terminal in which to type a token, so they would install successfully and
+# then be stuck. That is correct about the terminal. It is wrong only in
+# concluding that the prompt must be a terminal - the package ships a desktop
+# application which prompts in a window after the install. `postinst` still
+# does not enrol.
+
+
+def _deb_artifact(directory: Path, manifest: dict[str, Any]) -> Path:
+    """Locate the `.deb`, with the same containment rules as the script.
+
+    `_resolve_artifact` is reused rather than reimplemented, so the refusal to
+    serve a file outside the installer directory is one piece of code and not
+    two that can disagree.
+    """
+    return _resolve_artifact(directory, manifest)
+
+
+def _refuse_a_package_that_claims_to_enrol(manifest: dict[str, Any]) -> bool:
+    """Read `enrols_on_install`, and refuse anything but false.
+
+    The field exists so that this property is checked rather than described. A
+    package whose manifest claimed it enrolled on install would either be
+    lying, in which case the page would mislead every employee who read it, or
+    telling the truth, in which case a downloadable artifact is enrolling
+    laptops without a token and must not be served at all. Both are deployment
+    faults worth a 503.
+    """
+    value = manifest.get("enrols_on_install")
+    if value is not False:
+        raise _unavailable(
+            "The published package's manifest does not state that installation "
+            "leaves the laptop un-enrolled. Refusing to serve it: enrollment "
+            "must consume a single-use token issued to a person."
+        )
+    return False
+
+
+@router.get("/deb", response_model=DebPackageInfoResponse)
+def deb_info(
+    settings: Settings = Depends(get_settings),
+) -> DebPackageInfoResponse:
+    """What the enrollment page needs to offer the double-click download.
+
+    503 when no `.deb` is published, independently of the script: a server that
+    has only built the script keeps serving it, and the page can offer one
+    artifact without the other.
+    """
+    directory = _resolve_installer_dir(settings)
+    manifest = _read_manifest(directory, DEB_MANIFEST_FILENAME, DEB_MANIFEST_SCHEMA)
+    artifact = _deb_artifact(directory, manifest)
+
+    # Recomputed, not trusted. See the module docstring.
+    sha256, size = _digest(artifact)
+
+    return DebPackageInfoResponse(
+        package=_string(manifest, "package"),
+        agent_version=_string(manifest, "agent_version"),
+        deb_version=_string(manifest, "deb_version"),
+        architecture=_string(manifest, "architecture"),
+        filename=artifact.name,
+        sha256=sha256,
+        size_bytes=size,
+        installed_size_kib=_int(manifest, "installed_size_kib"),
+        built_at=_built_at(manifest),
+        server_url=_string(manifest, "server_url"),
+        depends=_string_list(manifest, "depends"),
+        bundled_wheels=_string_list(manifest, "bundled_wheels"),
+        target_pythons=_string_list(manifest, "target_pythons"),
+        enrols_on_install=_refuse_a_package_that_claims_to_enrol(manifest),
+    )
+
+
+@router.get(
+    "/deb/download",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "content": {DEB_MEDIA_TYPE: {}},
+            "description": "The agent Debian package.",
+        },
+        503: {"description": "No package is published on this server"},
+    },
+)
+def deb_download(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    """Serve the `.deb`.
+
+    The media type is the one dpkg, apt and GNOME Software recognise, which is
+    load-bearing rather than cosmetic: served as `application/octet-stream` the
+    file is saved as an unknown blob and double-clicking it does nothing, which
+    is the one thing this artifact exists to do.
+
+    `Content-Disposition: attachment` for the same reason as the script - the
+    file must land on disk to be installed - and the global no-store
+    `Cache-Control` is left in place so that an upgrade cannot be masked by a
+    cached copy of the previous build.
+    """
+    directory = _resolve_installer_dir(settings)
+    manifest = _read_manifest(directory, DEB_MANIFEST_FILENAME, DEB_MANIFEST_SCHEMA)
+    _refuse_a_package_that_claims_to_enrol(manifest)
+    artifact = _deb_artifact(directory, manifest)
+    sha256, _ = _digest(artifact)
+
+    return FileResponse(
+        path=artifact,
+        media_type=DEB_MEDIA_TYPE,
+        filename=artifact.name,
+        headers={"X-UbuntuGuard-SHA256": sha256},
     )

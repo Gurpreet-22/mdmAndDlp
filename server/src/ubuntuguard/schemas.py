@@ -282,6 +282,64 @@ class InstallerInfoResponse(BaseModel):
     )
 
 
+class DebPackageInfoResponse(BaseModel):
+    """Metadata for the double-clickable `.deb`. Public.
+
+    A second artifact beside the shell installer, not a replacement for it. The
+    two answer different questions: the script installs and prompts for a token
+    in one command, which suits an employee already in a terminal, while the
+    `.deb` is what a browser and GNOME Software can open, and what
+    configuration management can push to a fleet.
+
+    `enrols_on_install` is carried as a field rather than left to prose because
+    it is the property the whole design turns on. Installing the package does
+    not enrol the laptop; a desktop application does, afterwards, with a token
+    the employee types. The enrollment page states that, and a build that ever
+    changed it would change this field rather than quietly contradicting the
+    page.
+    """
+
+    package: str
+    agent_version: str
+    deb_version: str = Field(
+        description="The Debian version, which is the agent version plus a packaging revision."
+    )
+    architecture: str
+    filename: str
+    sha256: Hex64 = Field(
+        description="SHA-256 of the package, recomputed from the file on every request."
+    )
+    size_bytes: int
+    installed_size_kib: int = Field(
+        description="Disk the package occupies once unpacked, as declared to dpkg."
+    )
+    built_at: dt.datetime
+    server_url: str = Field(
+        description="The API URL baked into the package, so an employee can confirm it."
+    )
+    depends: list[str] = Field(
+        description=(
+            "Debian dependencies apt resolves on install, usbguard among them. "
+            "This is what makes the install pull what it needs without anyone "
+            "typing a command."
+        )
+    )
+    bundled_wheels: list[str] = Field(
+        description=(
+            "Python wheels carried inside the package, so the install needs no "
+            "access to PyPI. Empty when the package was built with --no-vendor."
+        )
+    )
+    target_pythons: list[str] = Field(description="CPython versions the bundled wheels satisfy.")
+    enrols_on_install: bool = Field(
+        description=(
+            "Always false. Enrollment consumes a single-use token and creates an "
+            "auditable identity, so it is a deliberate act by a person and never "
+            "a side effect of unpacking a package."
+        )
+    )
+
+
 class EnrollmentTokenResponse(BaseModel):
     """Metadata only. Neither the token nor its hash is ever listed."""
 

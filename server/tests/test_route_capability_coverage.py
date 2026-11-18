@@ -68,6 +68,11 @@ CAPABILITY_EXEMPT: dict[str, str] = {
     # --- Public: an enrolling employee has no account ---------------------- #
     "GET /api/v1/installer": "public installer metadata; carries no secret",
     "GET /api/v1/installer/download": "public installer download; carries no secret",
+    "GET /api/v1/installer/deb": "public package metadata; carries no secret",
+    "GET /api/v1/installer/deb/download": (
+        "public package download; carries no secret, and installing it does "
+        "not enrol - that still needs an administrator's single-use token"
+    ),
     # --- Must remain reachable DURING a forced password change ------------- #
     # These two are why the gate lives in `require_capability` rather than in
     # `get_principal`. Gating there would make the forced-change state
