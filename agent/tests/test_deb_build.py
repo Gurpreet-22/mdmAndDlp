@@ -400,6 +400,78 @@ def test_enrolling_stops_the_reminder(
     assert removals == [], f"the unprivileged launcher must not delete it: {removals}"
 
 
+def test_postinst_seeds_a_usbguard_baseline_so_the_install_cannot_lock_usb_out(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """Otherwise this package breaks the laptop it was installed to protect.
+
+    `Depends: usbguard` means apt installs and starts usbguard before this
+    package is configured. usbguard's shipped defaults are
+    ImplicitPolicyTarget=block, PresentDevicePolicy=apply-policy and
+    RuleFile=/etc/usbguard/rules.conf -- and the usbguard package ships no
+    rules.conf. An empty ruleset with an implicit block, applied to devices
+    already present, deauthorizes every USB device on the machine: an external
+    keyboard and mouse, a USB webcam, an internal bluetooth or fingerprint
+    reader on a USB bus.
+
+    So postinst seeds a baseline allowing what is plugged in, which is
+    usbguard's own documented bootstrap, before anything has been enrolled or
+    given a policy.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    assert "usbguard generate-policy" in postinst
+    assert "/etc/usbguard/rules.conf" in postinst
+
+
+def test_the_baseline_never_overwrites_an_existing_ruleset(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """An administrator's rules are theirs. Seeding is for the empty case only,
+    and clobbering a considered ruleset would be a policy change made by an
+    installer."""
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    seed = postinst.partition("seed_usbguard_baseline()")[2]
+    assert seed, "postinst has no baseline function"
+    # -s is "exists and is non-empty", which is the correct test: a zero-byte
+    # rules.conf is the lockout, not a decision.
+    assert "-s /etc/usbguard/rules.conf" in seed
+
+
+def test_an_empty_generated_policy_is_never_written(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """Writing an empty ruleset would BE the lockout.
+
+    If usbguard cannot enumerate anything, the safe action is to write nothing
+    and say so, not to install a file that blocks every device.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    seed = postinst.partition("seed_usbguard_baseline()")[2]
+    assert "-z ${generated}" in seed or '-z "${generated}"' in seed.replace("\\", "")
+
+
+def test_postinst_does_not_edit_another_packages_conffile(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """usbguard-daemon.conf belongs to the usbguard package.
+
+    Editing it would provoke dpkg conffile prompts on their upgrades and would
+    silently change a security setting an administrator may have chosen.
+    rules.conf is shipped by nobody, so creating that one is ours to do.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    writes = [
+        line
+        for line in postinst.splitlines()
+        if "usbguard-daemon.conf" in line and not line.lstrip().startswith("#")
+    ]
+    assert writes == [], f"postinst touches usbguard's conffile: {writes}"
+
+
 def test_an_already_enrolled_laptop_is_not_prompted(
     built: tuple[bytes, dict[str, object]],
 ) -> None:
