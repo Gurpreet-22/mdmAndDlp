@@ -599,6 +599,59 @@ def test_postinst_does_not_block_dpkg_on_a_dialog(
     assert "|| true" in postinst
 
 
+def test_a_fresh_enrollment_restarts_the_agent_rather_than_starting_it(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """`systemctl start` on a running unit is a no-op, and that stranded a real
+    laptop for hours.
+
+    Both units are enabled at install time and the agent may already be
+    running by the time anyone enrols -- started with no identity, failing
+    every heartbeat, and backing off to the BACKOFF_MAX_SECONDS cap of fifteen
+    minutes. `start` leaves that process untouched: same belief that it has no
+    identity, same backoff window, same failure count. Enrollment reported
+    success, the device row appeared, and the laptop still never checked in.
+
+    After writing an identity the services must be restarted so the agent
+    re-reads it from a clean state.
+    """
+    artifact, _ = built
+    helper = _tar_file(_data(artifact), builder.HELPER_PATH).decode()
+
+    # The branch that runs after a successful enrollment is the one that must
+    # restart. It is the block that sets start_failed.
+    after_enrol = helper.partition("start_failed=0")[2]
+    assert after_enrol, "the helper has no post-enrollment start block"
+    commands = [
+        line.strip()
+        for line in after_enrol.splitlines()
+        if "SYSTEMCTL" in line and not line.lstrip().startswith("#")
+    ]
+    assert commands, "nothing is started after enrollment"
+    assert all("restart" in line for line in commands), (
+        f"a fresh enrollment must restart, not start: {commands}"
+    )
+
+
+def test_the_already_enrolled_path_does_not_restart_a_working_agent(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """Nothing changed on disk on that path, so an agent that is already
+    running is already correct. Restarting it would drop a working heartbeat
+    loop for no reason."""
+    artifact, _ = built
+    helper = _tar_file(_data(artifact), builder.HELPER_PATH).decode()
+    already = helper.partition("not re-enrolling")[2].partition("exit 10")[0]
+    assert already, "the helper has no already-enrolled branch"
+    commands = [
+        line.strip()
+        for line in already.splitlines()
+        if "SYSTEMCTL" in line and not line.lstrip().startswith("#")
+    ]
+    assert commands, "the already-enrolled path should still ensure the services are up"
+    assert all("restart" not in line for line in commands), commands
+
+
 def test_the_helper_never_takes_the_token_as_an_argument(
     built: tuple[bytes, dict[str, object]], builder: ModuleType
 ) -> None:
