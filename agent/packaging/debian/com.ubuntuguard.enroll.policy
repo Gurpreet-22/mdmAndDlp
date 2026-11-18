@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD polkit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/software/polkit/policyconfig-1.dtd">
+
+<!--
+  The polkit action behind the enrollment application.
+
+  Without this file pkexec still works, but it asks "Authentication is
+  required to run /usr/libexec/ubuntuguard/ubuntuguard-enroll-root as the
+  super user", which tells an employee nothing about what they are approving.
+  A password prompt whose text the person cannot evaluate is a prompt they
+  learn to click through, so the message matters.
+
+  auth_admin rather than auth_admin_keep: the approval is not cached, so a
+  second enrollment attempt asks again. The operation runs once per laptop,
+  so there is no repetition to spare the employee, and avoiding an unprompted
+  window in which a root helper can be re-invoked is worth more than the one
+  saved password entry.
+
+  allow_inactive is "no" so the action cannot be taken from an inactive
+  session: a different user switched away from, or a lingering session on
+  another VT. Enrollment is something the person at the keyboard does.
+
+  The action is safe to expose at all because the helper takes no arguments.
+  Its only input is the enrollment token on stdin, so there is nothing an
+  attacker who can invoke it could ask it to do; the worst available outcome
+  is consuming a token they already hold.
+-->
+<policyconfig>
+
+  <vendor>UbuntuGuard</vendor>
+
+  <action id="com.ubuntuguard.enroll">
+    <description>Enrol this laptop with UbuntuGuard</description>
+    <message>Authentication is required to enrol this laptop with UbuntuGuard and start its device-management services.</message>
+    <icon_name>security-high</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/ubuntuguard/ubuntuguard-enroll-root</annotate>
+  </action>
+
+</policyconfig>

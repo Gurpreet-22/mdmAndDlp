@@ -1,0 +1,104 @@
+#!/bin/sh
+#
+# UbuntuGuard agent -- post-removal.
+#
+# The remove/purge split is the whole reason D11 asks for a `.deb`, and dpkg's
+# two-stage removal maps onto it exactly:
+#
+#   remove  takes away the code and the services, and KEEPS the device
+#           identity in /var/lib/ubuntuguard. Reinstalling afterwards picks up
+#           the existing key and does not need a new enrollment token. This is
+#           the safe default for the same reason uninstall.sh has it: deleting
+#           a private key cannot be undone, and re-enrolling a laptop creates
+#           a second device row for one machine.
+#
+#   purge   deletes the private key, the certificate, the configuration and
+#           the service account. "purge removes keys" is D11's wording.
+#
+# What is cleaned up here rather than by dpkg: the virtualenv, the two systemd
+# units and the service account. dpkg does not know about any of them, because
+# install.sh creates them at configure time rather than shipping them as
+# package files. The alternative -- shipping the units and letting dpkg track
+# them -- would mean this package and install.sh disagreeing about where units
+# come from, and only one of them is covered by the packaging tests.
+
+set -e
+
+SERVICE_NAME="ubuntuguard-agent"
+ENFORCER_NAME="ubuntuguard-enforcerd"
+AGENT_USER="ubuntuguard"
+AGENT_GROUP="ubuntuguard"
+VENV_PARENT="/opt/ubuntuguard"
+CONFIG_DIR="/etc/ubuntuguard"
+STATE_DIR="/var/lib/ubuntuguard"
+UNIT_DIR="/etc/systemd/system"
+
+remove_units() {
+    # Both units, including the enforcer. uninstall.sh still removes only the
+    # agent unit -- it predates the root enforcer -- so this does not delegate
+    # to it; see SECURITY-FINDINGS / the note in the packaging tests.
+    rm -f "${UNIT_DIR}/${SERVICE_NAME}.service"
+    rm -f "${UNIT_DIR}/${ENFORCER_NAME}.service"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl reset-failed "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+        systemctl reset-failed "${ENFORCER_NAME}.service" >/dev/null 2>&1 || true
+    fi
+}
+
+case "$1" in
+    remove)
+        remove_units
+        # The virtualenv is generated, not shipped, so dpkg will not remove it.
+        rm -rf "${VENV_PARENT}"
+        cat <<EOF
+
+UbuntuGuard agent removed. The device identity in ${STATE_DIR} was KEPT,
+so reinstalling will not need a new enrollment token.
+
+  To delete the private key and certificate as well:
+      sudo apt-get purge ubuntuguard-agent
+
+EOF
+        ;;
+
+    purge)
+        remove_units
+        rm -rf "${VENV_PARENT}"
+
+        # The key material. This is the irreversible step, and it is reached
+        # only through an explicit `purge`.
+        rm -rf "${STATE_DIR}"
+        rm -rf "${CONFIG_DIR}"
+
+        # The account goes last, so nothing it owns outlives it as an orphaned
+        # uid on the filesystem.
+        if getent passwd "${AGENT_USER}" >/dev/null 2>&1; then
+            userdel "${AGENT_USER}" >/dev/null 2>&1 || true
+        fi
+        if getent group "${AGENT_GROUP}" >/dev/null 2>&1; then
+            groupdel "${AGENT_GROUP}" >/dev/null 2>&1 || true
+        fi
+
+        cat <<EOF
+
+UbuntuGuard agent purged. The private key and certificate are gone.
+
+  The device row on the SERVER still exists, and purging a laptop cannot
+  reach it. Revoke it in the dashboard so that a copy of the removed key
+  cannot be used: Devices -> this host -> Revoke.
+
+EOF
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+
+exit 0

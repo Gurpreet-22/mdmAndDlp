@@ -1,0 +1,150 @@
+#!/bin/sh
+#
+# UbuntuGuard agent -- post-installation configuration.
+#
+# This script deliberately does NOT enrol the device, and does NOT start the
+# services. Both omissions are load-bearing.
+#
+# Not enrolling is feature D11's own constraint. Enrollment consumes a
+# single-use token and creates an auditable device identity, so it needs a
+# person behind it. A `.deb` cannot have one: it is unpacked by GNOME Software
+# or by configuration management, neither of which can be handed a token, and
+# the only way to make enrollment automatic would be to put a shared
+# credential inside the package where every employee who downloads it can read
+# it. Instead the package ships a desktop application --
+# `ubuntuguard-enroll` -- which the employee opens once and pastes their own
+# token into. That keeps "no terminal" without turning the token into public
+# material.
+#
+# Not starting matches `install.sh`, which enables but does not start, because
+# a freshly installed agent has no device identity and would do nothing but
+# produce a warning loop in the journal. The enrollment application starts
+# both units once the identity exists.
+#
+# The heavy lifting is delegated to packaging/install.sh rather than
+# reimplemented here, so there is exactly one description of what an installed
+# agent looks like and the 45 packaging tests that cover it still apply.
+
+set -e
+
+SHARE_DIR="/usr/share/ubuntuguard"
+SOURCE_DIR="${SHARE_DIR}/agent-src"
+WHEEL_DIR="${SHARE_DIR}/wheels"
+CONFIG_DIR="/etc/ubuntuguard"
+SUPPORTED_OS_ID="ubuntu"
+
+case "$1" in
+    configure)
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        exit 0
+        ;;
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+# --- preflight ------------------------------------------------------------- #
+# Checked here, before anything is modified, rather than left to install.sh.
+# install.sh would refuse too, but it refuses partway through its own run; a
+# failure in postinst leaves dpkg with a half-configured package, so the
+# cheaper and clearer outcome is to decide before touching the system.
+#
+# Reported as a warning and not a refusal, because `Architecture:` and the
+# dependency solver have already done the real gatekeeping, and a hard failure
+# here on a derivative distribution that is Ubuntu in all but os-release ID
+# would be unhelpful.
+
+host_os_id=""
+for candidate in /etc/os-release /usr/lib/os-release; do
+    if [ -r "${candidate}" ]; then
+        host_os_id="$(sed -n 's/^ID=//p' "${candidate}" | head -1 | tr -d '"')"
+        [ -n "${host_os_id}" ] && break
+    fi
+done
+
+if [ -n "${host_os_id}" ] && [ "${host_os_id}" != "${SUPPORTED_OS_ID}" ]; then
+    echo "ubuntuguard-agent: WARNING: this host reports os-release ID" >&2
+    echo "  '${host_os_id}'. The agent reads Ubuntu's interfaces and has one OS" >&2
+    echo "  adapter. It may run, but nothing about it has been validated here." >&2
+fi
+
+if [ ! -f "${SOURCE_DIR}/pyproject.toml" ]; then
+    echo "ubuntuguard-agent: ERROR: the agent source is missing from" >&2
+    echo "  ${SOURCE_DIR}. The package is incomplete; reinstall it." >&2
+    exit 1
+fi
+
+# --- install --------------------------------------------------------------- #
+# PIP_NO_INDEX and PIP_FIND_LINKS point pip at the wheels carried inside this
+# package instead of PyPI. Exported into the environment rather than passed as
+# flags because install.sh builds its own pip command lines, and pip reads
+# both variables natively -- so the install is fully offline without this
+# package needing its own fork of install.sh.
+#
+# Offline matters for more than convenience: an employee installing from
+# GNOME Software has no way to see a pip failure, and "the download worked but
+# configuring it silently needed the internet" is the exact failure mode that
+# makes a double-click installer untrustworthy.
+#
+# The wheelhouse carries pip itself for the same reason: install.sh runs
+# `pip install --upgrade pip`, which with no index and no local pip wheel
+# would fail and abort the install under `set -e`.
+if [ -d "${WHEEL_DIR}" ]; then
+    PIP_NO_INDEX=1
+    PIP_FIND_LINKS="${WHEEL_DIR}"
+    export PIP_NO_INDEX PIP_FIND_LINKS
+    echo "ubuntuguard-agent: installing from the bundled wheels (no network needed)"
+else
+    echo "ubuntuguard-agent: no bundled wheels in ${WHEEL_DIR}; pip will use its" >&2
+    echo "  configured index, which needs network access." >&2
+fi
+
+# --no-instructions: install.sh's closing text tells an operator to edit
+# agent.yaml and enrol by hand with a shell command. This package has already
+# written agent.yaml, and its answer to enrollment is the desktop application,
+# so that text would send the employee somewhere wrong.
+#
+# install.sh enables both units and does not start them, which is what this
+# package wants, so --no-enable is deliberately NOT passed.
+# Invoked with bash explicitly, not `sh`. install.sh has a bash shebang and
+# uses `[[`, `local` and ${BASH_SOURCE}; on Ubuntu /bin/sh is dash, which fails
+# on the first conditional with "[[: not found" and then dies claiming
+# pyproject.toml is missing -- a confusing error that has nothing to do with
+# the real cause. bash is Essential, so it needs no dependency declaration.
+bash "${SOURCE_DIR}/packaging/install.sh" \
+    --source "${SOURCE_DIR}" \
+    --no-instructions
+
+# --- configuration --------------------------------------------------------- #
+# agent.yaml is shipped as a dpkg conffile, so it is already unpacked by the
+# time this runs and install.sh will have kept it rather than overwriting it
+# with the example. Nothing to write here; the check exists so that a missing
+# config is reported now rather than as a confusing agent startup failure
+# later.
+if [ ! -f "${CONFIG_DIR}/agent.yaml" ]; then
+    echo "ubuntuguard-agent: WARNING: ${CONFIG_DIR}/agent.yaml is missing, which" >&2
+    echo "  should not be possible for a conffile. The agent will not start until" >&2
+    echo "  it has a server URL." >&2
+fi
+
+# Refresh the desktop and polkit caches so the enrollment application appears
+# in the applications menu without a logout. Both are best-effort: the
+# application is still launchable without them.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications 2>/dev/null || true
+fi
+
+cat <<'EOF'
+
+UbuntuGuard agent installed. This laptop is NOT yet enrolled.
+
+  To finish, open "Enrol this laptop with UbuntuGuard" from your
+  applications menu and paste the one-time token your administrator
+  sent you. Nothing starts reporting until that is done.
+
+EOF
+
+
+exit 0

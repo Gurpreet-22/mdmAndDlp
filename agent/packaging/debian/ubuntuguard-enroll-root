@@ -1,0 +1,147 @@
+#!/bin/sh
+#
+# UbuntuGuard enrollment -- the privileged half.
+#
+# Reached only through pkexec, from `ubuntuguard-enroll`. Reads a single-use
+# enrollment token on STDIN, hands it to the agent, and starts the two
+# services once an identity exists.
+#
+# Why the token arrives on stdin and nowhere else
+# -----------------------------------------------
+# Anything in a command line is readable by every user on the machine through
+# /proc/<pid>/cmdline and shows up in `ps`, so a token passed as an argument is
+# a credential published to the whole system. The agent itself refuses to take
+# one that way -- there is deliberately no `--token` option -- and this script
+# keeps that property across the privilege boundary. pkexec passes stdin
+# through to the program it runs, so the value goes employee -> launcher ->
+# this script -> agent over pipes and never touches a disk, a log or an argv.
+#
+# This script takes NO arguments at all. That is also what makes the polkit
+# action safe to grant: there is no input to it other than the token, so there
+# is nothing an attacker who can invoke it could ask it to do. The worst
+# available outcome is consuming an enrollment token they already hold.
+#
+# Why enrollment drops to the `ubuntuguard` account
+# -------------------------------------------------
+# `identity.py` never chowns: it writes the private key at mode 0600 owned by
+# whoever is running. The agent unit runs `User=ubuntuguard`. Enrolling as root
+# would therefore leave a root-owned device.key in a directory the service
+# account owns, and the service could not read the one file the whole device
+# identity rests on. It would appear to work and then fail on the first
+# heartbeat. install.sh's own installer does the same drop, for the same
+# reason.
+#
+# Exit codes, consumed by the launcher to pick a message
+# ------------------------------------------------------
+#    0  enrolled, both services started
+#   10  already enrolled; nothing to do
+#   11  no token arrived on stdin
+#   12  the server refused the token
+#   13  the agent is not installed properly
+#   14  enrolled, but a service did not start
+
+set -eu
+
+AGENT_USER="ubuntuguard"
+AGENT_BIN="/opt/ubuntuguard/venv/bin/ubuntuguard-agent"
+STATE_DIR="/var/lib/ubuntuguard"
+SERVICE_NAME="ubuntuguard-agent"
+ENFORCER_NAME="ubuntuguard-enforcerd"
+
+# Absolute paths throughout. pkexec resets the environment, including PATH, so
+# a bare `systemctl` here would depend on a PATH this script does not control.
+RUNUSER="/usr/sbin/runuser"
+SYSTEMCTL="/usr/bin/systemctl"
+TIMEOUT="/usr/bin/timeout"
+GETENT="/usr/bin/getent"
+
+#: Enrollment makes one HTTPS request. Bounded so that an unreachable or
+#: black-holed server fails with a message instead of leaving the employee
+#: looking at a dialog that never returns.
+ENROLL_TIMEOUT_SECONDS=60
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This helper must run as root; it is meant to be invoked through pkexec." >&2
+    exit 13
+fi
+
+if [ "$#" -ne 0 ]; then
+    # Refused rather than ignored. This script is a polkit-granted root entry
+    # point, so "it takes no arguments" is a property worth enforcing rather
+    # than documenting.
+    echo "This helper takes no arguments." >&2
+    exit 13
+fi
+
+if [ ! -x "${AGENT_BIN}" ]; then
+    echo "The UbuntuGuard agent is not installed at ${AGENT_BIN}." >&2
+    exit 13
+fi
+
+if ! "${GETENT}" passwd "${AGENT_USER}" >/dev/null 2>&1; then
+    echo "The ${AGENT_USER} service account does not exist." >&2
+    exit 13
+fi
+
+# --- already enrolled? ----------------------------------------------------- #
+# The same test `identity.is_enrolled` makes: both halves present. Checked here
+# rather than in the launcher because ${STATE_DIR} is mode 0750 owned by the
+# service account, so an unprivileged process cannot see inside it.
+if [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ]; then
+    echo "This laptop already has a device identity; not re-enrolling."
+    # Still ensure the services are up: a laptop that enrolled but whose
+    # services were stopped is the most likely reason someone opens this
+    # application a second time.
+    "${SYSTEMCTL}" start "${ENFORCER_NAME}.service" >/dev/null 2>&1 || true
+    "${SYSTEMCTL}" start "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+    exit 10
+fi
+
+# --- the token ------------------------------------------------------------- #
+# Read with `head -1` so a trailing newline from a paste does not become part
+# of the token, and so a stdin that is a terminal (someone running this by
+# hand) does not hang forever reading to EOF.
+token="$(head -1 || true)"
+
+# Whitespace trimmed: employees paste from email and chat clients, which add
+# spaces and non-breaking spaces with some regularity. The server would refuse
+# the token and report "invalid", which is true but sends the employee looking
+# for the wrong problem.
+token="$(printf '%s' "${token}" | tr -d '[:space:]')"
+
+if [ -z "${token}" ]; then
+    echo "No enrollment token was supplied." >&2
+    exit 11
+fi
+
+# --- enrol ----------------------------------------------------------------- #
+# The token goes over a pipe into the agent's --token-stdin. It is never
+# written to a file, never an argument, and the variable goes out of scope with
+# this process.
+if ! printf '%s' "${token}" \
+    | "${TIMEOUT}" "${ENROLL_TIMEOUT_SECONDS}" \
+        "${RUNUSER}" -u "${AGENT_USER}" -- "${AGENT_BIN}" enroll --token-stdin; then
+    # The agent has already printed the specific reason -- expired, already
+    # used, revoked, unreachable -- on stderr, which the launcher shows.
+    exit 12
+fi
+
+# --- start ----------------------------------------------------------------- #
+# The enforcer first: it owns the Unix socket the agent connects to, so
+# starting it second would give the agent a window of failed connections on a
+# freshly enrolled laptop.
+#
+# Started here rather than enabled: install.sh already enabled both units for
+# start at boot. This is the one-time start that install.sh deliberately does
+# not do, because before this point there was no identity to report with.
+start_failed=0
+"${SYSTEMCTL}" start "${ENFORCER_NAME}.service" || start_failed=1
+"${SYSTEMCTL}" start "${SERVICE_NAME}.service" || start_failed=1
+
+if [ "${start_failed}" -ne 0 ]; then
+    echo "Enrollment succeeded, but a service did not start." >&2
+    exit 14
+fi
+
+echo "Enrolled and running."
+exit 0

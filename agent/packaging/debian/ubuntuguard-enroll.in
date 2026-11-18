@@ -1,0 +1,194 @@
+#!/bin/bash
+#
+# UbuntuGuard enrollment -- the employee-facing half.
+#
+# Runs as the employee, in their own session, with no privilege. Collects the
+# one-time enrollment token in a dialog and hands it to the privileged helper
+# over a pipe.
+#
+# This is the answer to the one thing a `.deb` genuinely cannot do. Installing
+# the package must not enrol -- enrollment consumes a single-use token and
+# creates an auditable identity, so it needs a person behind it -- and a
+# package unpacked by GNOME Software has no terminal in which to type one. The
+# documented conclusion was that the employee artifact therefore had to be a
+# script. It does not: the prompt just has to be a window rather than a
+# terminal, and it has to come after installation rather than during it.
+#
+# What this does NOT do is make enrollment automatic. It cannot. Automatic
+# enrollment means a credential the package already holds, and a package
+# downloaded by every employee holds nothing secret. The token stays something
+# a person is given and types once.
+#
+# The token never reaches a disk, a log or a command line. It is read into a
+# shell variable, written to the helper's stdin, and discarded.
+
+set -uo pipefail
+
+HELPER="/usr/libexec/ubuntuguard/ubuntuguard-enroll-root"
+TITLE="UbuntuGuard Enrollment"
+ADMIN_CONTACT="@ADMIN_CONTACT@"
+SERVER_URL="@SERVER_URL@"
+
+#: Width of the entry dialog. Enrollment tokens are 43 characters of base64url
+#: and the GTK default is narrower than that, which makes a pasted token look
+#: truncated and invites someone to "fix" it.
+DIALOG_WIDTH=460
+
+# --- no graphical session? ------------------------------------------------- #
+# This program is a GUI wrapper. Run without a display -- over SSH, or from a
+# text console -- it should say what to run instead rather than fail with a
+# GTK error.
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    cat >&2 <<EOF
+${TITLE} is a graphical application and there is no display available.
+
+To enrol from a terminal instead:
+    sudo /opt/ubuntuguard/venv/bin/ubuntuguard-agent enroll --token-prompt
+    sudo systemctl start ubuntuguard-enforcerd ubuntuguard-agent
+EOF
+    exit 1
+fi
+
+if ! command -v zenity >/dev/null 2>&1; then
+    echo "zenity is not installed, so the enrollment dialog cannot be shown." >&2
+    exit 1
+fi
+
+die_gui() {
+    zenity --error --title="${TITLE}" --width="${DIALOG_WIDTH}" --text="$1" 2>/dev/null
+    exit 1
+}
+
+if [ ! -x "${HELPER}" ]; then
+    die_gui "The UbuntuGuard enrollment helper is missing.\n\nReinstall the ubuntuguard-agent package, then try again."
+fi
+
+if ! command -v pkexec >/dev/null 2>&1; then
+    die_gui "pkexec is not available, so this application cannot ask for administrator approval.\n\nInstall the <tt>polkitd</tt> package, or contact ${ADMIN_CONTACT}."
+fi
+
+# --- collect the token ----------------------------------------------------- #
+# --hide-text, for the same reason the script installer reads it with echo
+# off: enrollment happens on a laptop being set up, often with someone else
+# in the room or a screen being shared.
+token="$(
+    zenity --entry \
+        --title="${TITLE}" \
+        --width="${DIALOG_WIDTH}" \
+        --hide-text \
+        --text="$(printf '%s' \
+            "Enrol this laptop with UbuntuGuard.\n\n" \
+            "Paste the one-time enrollment token your administrator sent you.\n\n" \
+            "Server: ${SERVER_URL}")" \
+        2>/dev/null
+)"
+entry_status=$?
+
+# Cancel, or the window closed. Not an error, and not worth a dialog saying so.
+if [ "${entry_status}" -ne 0 ]; then
+    exit 0
+fi
+
+if [ -z "${token//[[:space:]]/}" ]; then
+    die_gui "No token was entered, so this laptop has not been enrolled.\n\nOpen this application again when you have the token from ${ADMIN_CONTACT}."
+fi
+
+# --- run the privileged helper --------------------------------------------- #
+# Backgrounded so a pulsating progress dialog can run alongside it. The
+# polkit authentication dialog is system-modal and appears above the progress
+# window, so the employee sees the password prompt first and the spinner after.
+#
+# Only the helper's own messages go to this file. The token is not in them;
+# it is on the pipe, which is not captured.
+output_file="$(mktemp -t ubuntuguard-enroll.XXXXXX)"
+status_file="$(mktemp -t ubuntuguard-status.XXXXXX)"
+trap 'rm -f -- "${output_file}" "${status_file}"' EXIT
+
+(
+    printf '%s' "${token}" | pkexec "${HELPER}" >"${output_file}" 2>&1
+    printf '%s' "$?" >"${status_file}"
+) &
+worker=$!
+
+# Unset as soon as it has been handed over, so the value is not sitting in the
+# environment of a process that is about to wait for a network round trip.
+token=""
+
+# --no-cancel: an enrollment in flight cannot be meaningfully cancelled. The
+# server may already have consumed the token, so offering a Cancel button
+# would imply a rollback that does not exist.
+(
+    while kill -0 "${worker}" 2>/dev/null; do
+        printf '#Enrolling this laptop. This may take a few seconds...\n'
+        sleep 0.4
+    done
+) | zenity --progress \
+        --title="${TITLE}" \
+        --width="${DIALOG_WIDTH}" \
+        --pulsate \
+        --auto-close \
+        --no-cancel \
+        2>/dev/null || true
+
+wait "${worker}"
+status="$(cat "${status_file}" 2>/dev/null || echo 1)"
+detail="$(cat "${output_file}" 2>/dev/null || true)"
+
+# Escaped because zenity renders Pango markup, so a stray '&' or '<' in a
+# server error message would be swallowed or would break the dialog.
+escape_markup() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+detail_markup="$(escape_markup "${detail}")"
+
+case "${status}" in
+    0)
+        zenity --info --title="${TITLE}" --width="${DIALOG_WIDTH}" \
+            --text="<b>This laptop is now enrolled.</b>\n\nUbuntuGuard is running and will apply the USB policy your administrator sets. You can close this window." \
+            2>/dev/null
+        ;;
+    10)
+        zenity --info --title="${TITLE}" --width="${DIALOG_WIDTH}" \
+            --text="<b>This laptop is already enrolled.</b>\n\nNothing was changed, and the token you entered was not used. The UbuntuGuard services have been started if they were not already running." \
+            2>/dev/null
+        ;;
+    11)
+        die_gui "No token reached the enrollment helper, so this laptop has not been enrolled.\n\nTry again, or contact ${ADMIN_CONTACT}."
+        ;;
+    12)
+        die_gui "$(printf '%s' \
+            "<b>The server refused the enrollment token.</b>\n\n" \
+            "Enrollment tokens are single use and they expire, so the likely causes are that it has already been used, that it has expired, or that it was copied incompletely.\n\n" \
+            "Ask ${ADMIN_CONTACT} for a new token.\n\n" \
+            "<small>${detail_markup}</small>")"
+        ;;
+    13)
+        die_gui "$(printf '%s' \
+            "<b>The UbuntuGuard agent is not installed correctly.</b>\n\n" \
+            "Reinstall the ubuntuguard-agent package, or contact ${ADMIN_CONTACT}.\n\n" \
+            "<small>${detail_markup}</small>")"
+        ;;
+    14)
+        die_gui "$(printf '%s' \
+            "<b>This laptop was enrolled, but the UbuntuGuard services did not start.</b>\n\n" \
+            "The enrollment itself succeeded, so do not ask for another token. Contact ${ADMIN_CONTACT} and show them this message.\n\n" \
+            "<small>${detail_markup}</small>")"
+        ;;
+    126 | 127)
+        # pkexec's own codes: authentication dialog dismissed, or not
+        # authorised. Not an enrollment failure, and not worth an alarming
+        # dialog -- the employee pressed Cancel.
+        zenity --warning --title="${TITLE}" --width="${DIALOG_WIDTH}" \
+            --text="Administrator approval is needed to enrol this laptop, and it was not given.\n\nNothing was changed. Open this application again to retry." \
+            2>/dev/null
+        exit 1
+        ;;
+    *)
+        die_gui "$(printf '%s' \
+            "<b>Enrollment did not complete.</b>\n\n" \
+            "Contact ${ADMIN_CONTACT} and show them this message.\n\n" \
+            "<small>exit status ${status}\n${detail_markup}</small>")"
+        ;;
+esac
+
+exit 0

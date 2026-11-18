@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Enrol this laptop with UbuntuGuard
+GenericName=Device Enrollment
+Comment=Register this laptop with your organisation's UbuntuGuard server
+# No arguments. The enrollment token is typed into a dialog and passed to the
+# privileged helper on a pipe, never on a command line, because anything in a
+# command line is readable by every user on the machine through /proc.
+Exec=/usr/bin/ubuntuguard-enroll
+# A stock icon from the theme rather than one shipped by this package: a
+# missing icon file would show as a blank tile in the applications grid, and
+# "security-high" is present in Adwaita and in Yaru, which covers Ubuntu's
+# default desktop and its flavours.
+Icon=security-high
+Terminal=false
+# One main category (System) plus one additional (Security). Listing Settings
+# as well would be a second main category, which makes the launcher appear
+# twice in the applications menu.
+Categories=System;Security;
+Keywords=UbuntuGuard;MDM;USB;enrol;enroll;enrollment;device;token;
+StartupNotify=true

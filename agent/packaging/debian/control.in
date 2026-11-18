@@ -1,0 +1,26 @@
+Package: ubuntuguard-agent
+Version: @DEB_VERSION@
+Section: admin
+Priority: optional
+Architecture: @DEB_ARCH@
+Depends: @DEB_DEPENDS@
+Maintainer: @DEB_MAINTAINER@
+Homepage: @DEB_HOMEPAGE@
+Installed-Size: @DEB_INSTALLED_SIZE@
+Description: UbuntuGuard endpoint agent with USB device control
+ The UbuntuGuard agent reports this laptop's inventory to the UbuntuGuard
+ server and applies the USB device policy an administrator sets in the
+ dashboard. It installs two systemd services: an unprivileged agent that
+ talks to the network, and a root enforcer that changes usbguard rules. The
+ two communicate over a local Unix socket, so the component exposed to the
+ network is not the component holding privilege.
+ .
+ Installing this package does NOT enrol the laptop. Enrollment consumes a
+ single-use token and creates an auditable device identity, so it is a
+ deliberate action with a person behind it rather than a side effect of
+ unpacking a package. After installing, open "Enrol this laptop with
+ UbuntuGuard" from the applications menu and paste the token your
+ administrator sent you.
+ .
+ This package carries no credential of any kind. The device's private key is
+ generated on this laptop during enrollment and never leaves it.

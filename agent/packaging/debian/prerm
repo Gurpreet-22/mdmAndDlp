@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# UbuntuGuard agent -- pre-removal.
+#
+# Stops and disables both units before the files they execute are taken away.
+# Doing it here rather than in postrm means the services are never running
+# against a half-deleted virtualenv.
+#
+# On `upgrade` the services are deliberately left alone: dpkg unpacks the new
+# version and runs postinst, and stopping a working agent for the duration of
+# an upgrade would create a reporting gap for no benefit. The agent's code
+# lives in a virtualenv that install.sh rebuilds in place, and systemd picks
+# up the new code on the next restart.
+
+set -e
+
+SERVICE_NAME="ubuntuguard-agent"
+ENFORCER_NAME="ubuntuguard-enforcerd"
+
+case "$1" in
+    remove|deconfigure)
+        if command -v systemctl >/dev/null 2>&1; then
+            # The enforcer first. It is the agent's dependency, not the other
+            # way round, and stopping the privileged half before the half that
+            # talks to it avoids a window where the agent retries a socket
+            # that is going away.
+            systemctl stop "${ENFORCER_NAME}.service" >/dev/null 2>&1 || true
+            systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+            systemctl disable "${ENFORCER_NAME}.service" >/dev/null 2>&1 || true
+            systemctl disable "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+        fi
+        ;;
+    upgrade|failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+
+exit 0
