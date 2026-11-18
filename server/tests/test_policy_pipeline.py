@@ -31,9 +31,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from ubuntuguard import repositories
 from ubuntuguard.models import Base, Device, User
 from ubuntuguard.services import policy as svc
-from ubuntuguard.services.policy_signing import PolicySigner, verify_envelope
+from ubuntuguard.services.policy_signing import (
+    PayloadHashMismatchError,
+    PolicySigner,
+    verify_envelope,
+)
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 
 
 @pytest.fixture
@@ -90,11 +94,7 @@ def signer(tmp_path) -> PolicySigner:
 def _usb_control_schema() -> dict:
     from pathlib import Path
 
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "schemas"
-        / "policy.usb_control.v1.schema.json"
-    )
+    path = Path(__file__).resolve().parents[2] / "schemas" / "policy.usb_control.v1.schema.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -161,9 +161,7 @@ def test_a_built_allowlist_entry_matches_the_schema_shape() -> None:
         "added_by": "admin",
         "added_at": "2026-01-01T00:00:00Z",
     }
-    payload = svc.build_usb_control_payload(
-        mode="allowlist_enforce", allowlist=[entry]
-    )
+    payload = svc.build_usb_control_payload(mode="allowlist_enforce", allowlist=[entry])
     built = payload["allowlist"][0]
     assert entry_required <= set(built)
     assert set(built) <= set(defs["allowlistEntry"]["properties"])
@@ -378,9 +376,7 @@ def test_rebuilt_envelope_still_verifies(session: Session, actor, signer) -> Non
     assert verify_envelope(rebuilt, trusted) == row.payload
 
 
-def test_a_tampered_payload_fails_verification(
-    session: Session, actor, signer
-) -> None:
+def test_a_tampered_payload_fails_verification(session: Session, actor, signer) -> None:
     row, _ = svc.issue_policy(
         session,
         signer=signer,
@@ -397,7 +393,11 @@ def test_a_tampered_payload_fails_verification(
         json.dumps(swapped, separators=(",", ":"), sort_keys=True).encode()
     ).decode()
 
-    with pytest.raises(Exception):
+    # Named rather than a blind `Exception`: the point of the test is that the
+    # payload hash in the signed envelope is what binds the signature to the
+    # bytes, so swapping the payload must fail on the hash and not merely fail
+    # somehow. A blind assertion would also pass on a typo in the call.
+    with pytest.raises(PayloadHashMismatchError):
         verify_envelope(forged, {signer.key_id: signer.public_key})
 
 
@@ -428,9 +428,7 @@ def test_no_policy_resolves_to_none(session: Session, device) -> None:
     )
 
 
-def test_fleet_policy_applies_without_assignment(
-    session: Session, device, actor, signer
-) -> None:
+def test_fleet_policy_applies_without_assignment(session: Session, device, actor, signer) -> None:
     fleet = _issue(
         session, signer, actor, mode="monitor_only", scope_kind="fleet", scope_id="fleet"
     )
@@ -441,12 +439,8 @@ def test_fleet_policy_applies_without_assignment(
     assert found.id == fleet.id
 
 
-def test_device_assignment_beats_fleet(
-    session: Session, device, actor, signer
-) -> None:
-    _issue(
-        session, signer, actor, mode="monitor_only", scope_kind="fleet", scope_id="fleet"
-    )
+def test_device_assignment_beats_fleet(session: Session, device, actor, signer) -> None:
+    _issue(session, signer, actor, mode="monitor_only", scope_kind="fleet", scope_id="fleet")
     specific = _issue(
         session,
         signer,
@@ -465,9 +459,7 @@ def test_device_assignment_beats_fleet(
     assert found.id == specific.id
 
 
-def test_highest_version_wins_within_a_scope(
-    session: Session, device, actor, signer
-) -> None:
+def test_highest_version_wins_within_a_scope(session: Session, device, actor, signer) -> None:
     for mode in ("monitor_only", "allowlist_enforce", "block_all_storage"):
         row = _issue(
             session,
@@ -492,9 +484,7 @@ def test_highest_version_wins_within_a_scope(
     assert svc.decoded_payload(found)["mode"] == "block_all_storage"
 
 
-def test_unassigning_retires_rather_than_deletes(
-    session: Session, device, actor, signer
-) -> None:
+def test_unassigning_retires_rather_than_deletes(session: Session, device, actor, signer) -> None:
     """What a laptop was under, and when, is what an auditor asks."""
     row = _issue(
         session,
@@ -504,9 +494,7 @@ def test_unassigning_retires_rather_than_deletes(
         scope_kind="device",
         scope_id=str(device.id),
     )
-    repositories.assign_policy(
-        session, policy_id=row.id, device_id=device.id, assigned_by=actor.id
-    )
+    repositories.assign_policy(session, policy_id=row.id, device_id=device.id, assigned_by=actor.id)
     retired = repositories.unassign_policies_of_type(
         session, device_id=device.id, policy_type="usb_control"
     )
@@ -542,9 +530,7 @@ def test_reassigning_the_same_policy_revives_one_row(
     first = repositories.assign_policy(
         session, policy_id=row.id, device_id=device.id, assigned_by=actor.id
     )
-    repositories.unassign_policies_of_type(
-        session, device_id=device.id, policy_type="usb_control"
-    )
+    repositories.unassign_policies_of_type(session, device_id=device.id, policy_type="usb_control")
     second = repositories.assign_policy(
         session, policy_id=row.id, device_id=device.id, assigned_by=actor.id
     )
@@ -574,12 +560,8 @@ def test_advertised_entry_carries_no_policy_content(
         scope_kind="device",
         scope_id=str(device.id),
     )
-    repositories.assign_policy(
-        session, policy_id=row.id, device_id=device.id, assigned_by=actor.id
-    )
-    advertised = repositories.available_policies_for_device(
-        session, device_id=device.id
-    )
+    repositories.assign_policy(session, policy_id=row.id, device_id=device.id, assigned_by=actor.id)
+    advertised = repositories.available_policies_for_device(session, device_id=device.id)
     assert advertised == [
         {
             "policy_type": "usb_control",
@@ -601,9 +583,7 @@ def test_nothing_is_advertised_without_a_policy(session: Session, device) -> Non
 # --------------------------------------------------------------------------- #
 
 
-def test_status_is_recorded_with_the_readback(
-    session: Session, device, actor, signer
-) -> None:
+def test_status_is_recorded_with_the_readback(session: Session, device, actor, signer) -> None:
     row = _issue(
         session, signer, actor, mode="block_all_storage", scope_kind="fleet", scope_id="fleet"
     )
@@ -622,16 +602,17 @@ def test_status_is_recorded_with_the_readback(
     assert stored.verified_state == readback
 
 
-def test_a_later_report_replaces_the_earlier_one(
-    session: Session, device, actor, signer
-) -> None:
+def test_a_later_report_replaces_the_earlier_one(session: Session, device, actor, signer) -> None:
     """One row per (device, policy): the latest report is the one that matters,
     and the audit log carries the history worth keeping."""
     row = _issue(
         session, signer, actor, mode="block_all_storage", scope_kind="fleet", scope_id="fleet"
     )
     repositories.record_policy_status(
-        session, device_id=device.id, policy_id=row.id, status="failed",
+        session,
+        device_id=device.id,
+        policy_id=row.id,
+        status="failed",
         reason_code="enforce_failed",
     )
     repositories.record_policy_status(
@@ -647,9 +628,7 @@ def test_a_later_report_replaces_the_earlier_one(
 def test_long_reason_and_detail_are_truncated_to_the_column(
     session: Session, device, actor, signer
 ) -> None:
-    row = _issue(
-        session, signer, actor, mode="monitor_only", scope_kind="fleet", scope_id="fleet"
-    )
+    row = _issue(session, signer, actor, mode="monitor_only", scope_kind="fleet", scope_id="fleet")
     stored = repositories.record_policy_status(
         session,
         device_id=device.id,
@@ -681,9 +660,7 @@ def test_summarise_describes_the_policy(session: Session, actor, signer) -> None
         session,
         signer=signer,
         policy_type="usb_control",
-        payload=svc.build_usb_control_payload(
-            mode="allowlist_enforce", allowlist=[entry]
-        ),
+        payload=svc.build_usb_control_payload(mode="allowlist_enforce", allowlist=[entry]),
         scope_kind="fleet",
         scope_id="fleet",
         created_by=actor.id,

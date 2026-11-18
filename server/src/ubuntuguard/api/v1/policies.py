@@ -51,7 +51,8 @@ from ubuntuguard.schemas import (
     SetUsbPolicyRequest,
 )
 from ubuntuguard.security.rbac import Capability
-from ubuntuguard.services import audit, policy as policy_service
+from ubuntuguard.services import audit
+from ubuntuguard.services import policy as policy_service
 from ubuntuguard.services.keys import KeyBundle
 
 admin_router = APIRouter(prefix="/policies", tags=["policies"])
@@ -272,9 +273,7 @@ def device_usb_policy(
     if policy is None:
         return DeviceUsbPolicyView(policy=None, status=None)
 
-    status_row = repositories.get_policy_status(
-        session, device_id=device_id, policy_id=policy.id
-    )
+    status_row = repositories.get_policy_status(session, device_id=device_id, policy_id=policy.id)
     return DeviceUsbPolicyView(
         policy=_detail(policy),
         status=_status_response(status_row, policy) if status_row else None,
@@ -341,9 +340,7 @@ def report_policy_status(
         session, device_id=uuid.UUID(principal.device_id), policy_type=policy.policy_type
     )
     if in_force is None or in_force.id != policy.id:
-        raise problems.conflict(
-            "policy_not_assigned", "this device is not under that policy"
-        )
+        raise problems.conflict("policy_not_assigned", "this device is not under that policy")
 
     repositories.record_policy_status(
         session,

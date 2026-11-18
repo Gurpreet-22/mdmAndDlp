@@ -91,9 +91,7 @@ class PolicyError(Exception):
     """A policy cannot be built as asked. The message is operator-facing."""
 
 
-def _validate_classes(
-    protected: Sequence[str], always_allow: Sequence[str]
-) -> None:
+def _validate_classes(protected: Sequence[str], always_allow: Sequence[str]) -> None:
     unknown_protected = [c for c in protected if c not in PROTECTED_CLASS_NAMES]
     if unknown_protected:
         raise PolicyError(

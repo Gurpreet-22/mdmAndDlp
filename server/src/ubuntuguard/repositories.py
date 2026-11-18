@@ -1464,9 +1464,7 @@ def available_policies_for_device(
     """
     out: list[dict[str, int | str]] = []
     for policy_type in POLICY_TYPES:
-        policy = effective_policy_for_device(
-            session, device_id=device_id, policy_type=policy_type
-        )
+        policy = effective_policy_for_device(session, device_id=device_id, policy_type=policy_type)
         if policy is not None:
             out.append(
                 {
