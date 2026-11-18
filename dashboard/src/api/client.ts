@@ -13,6 +13,7 @@ import type {
   DeviceListQuery,
   DeviceSummary,
   DeviceUsbPolicyView,
+  DebPackageInfoResponse,
   Employee,
   EnrollmentTokenResponse,
   InstallerInfoResponse,
@@ -67,6 +68,7 @@ export type {
   DeviceCounts,
   DeviceDetail,
   DeviceListQuery,
+  DebPackageInfoResponse,
   DevicePlatform,
   DeviceSummary,
   Employee,
@@ -272,6 +274,17 @@ export const api = {
    */
   installerInfo: () =>
     request<InstallerInfoResponse>("/api/v1/installer", { anonymous: true }),
+
+  /**
+   * Metadata for the double-clickable `.deb`. PUBLIC, for the same reasons.
+   *
+   * Answers 503 when the server has published the script but not the package,
+   * which is a normal deployment state rather than an error: the two artifacts
+   * are built and published independently. The enrollment page treats a
+   * failure here as "offer the script only" and not as a page-level error.
+   */
+  debInfo: () =>
+    request<DebPackageInfoResponse>("/api/v1/installer/deb", { anonymous: true }),
 
   /**
    * Admin accounts, newest first. `search` is a substring of the address.

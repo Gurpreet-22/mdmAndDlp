@@ -277,6 +277,42 @@ export interface InstallerInfoResponse {
   validated_os_versions: string[];
 }
 
+/**
+ * Metadata for the double-clickable `.deb`. From a PUBLIC endpoint.
+ *
+ * A second artifact beside the shell installer, not a replacement. The script
+ * installs and prompts for a token in one command, which suits someone already
+ * in a terminal; the `.deb` is what a browser and GNOME Software can open.
+ *
+ * `enrols_on_install` is always false and is rendered rather than assumed. The
+ * package installs the agent and stops there; a desktop application does the
+ * enrollment afterwards, with a token the employee types. The page has to say
+ * so, because an employee who installs and then sees nothing happen would
+ * otherwise reasonably conclude it had failed.
+ */
+export interface DebPackageInfoResponse {
+  package: string;
+  agent_version: string;
+  /** The agent version plus a packaging revision, e.g. `0.1.0-1`. */
+  deb_version: string;
+  architecture: string;
+  filename: string;
+  /** Recomputed by the server from the file on every request. */
+  sha256: string;
+  size_bytes: number;
+  installed_size_kib: number;
+  built_at: string;
+  /** The API URL baked into the package, so an employee can confirm it. */
+  server_url: string;
+  /** Debian dependencies apt resolves on install, usbguard among them. */
+  depends: string[];
+  /** Wheels carried inside the package, so the install needs no PyPI access. */
+  bundled_wheels: string[];
+  target_pythons: string[];
+  /** Always false. Installing does not enrol; the desktop app does. */
+  enrols_on_install: boolean;
+}
+
 /** Query parameters for GET /api/v1/devices. */
 export interface DeviceListQuery {
   /** Matches label, hostname, assignee or asset tag. */

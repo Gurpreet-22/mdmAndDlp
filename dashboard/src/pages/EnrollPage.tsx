@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
-import type { InstallerInfoResponse } from "../api/client";
+import type { DebPackageInfoResponse, InstallerInfoResponse } from "../api/client";
 
 /**
  * The employee-facing enrollment page, served at /enroll.
@@ -23,9 +23,28 @@ import type { InstallerInfoResponse } from "../api/client";
  * the employee's own machine. A web form that collected one would put a
  * single-use credential into a browser, a server log and a form history for no
  * reason at all.
+ *
+ * Two downloads, offered in that order
+ * ------------------------------------
+ * The `.deb` is offered first because it needs no terminal: Ubuntu installs it
+ * on a double-click, apt pulls in usbguard, and a desktop application does the
+ * enrollment afterwards. The shell installer stays as the alternative, because
+ * it does the whole job in one command for anyone already in a terminal and it
+ * works where the package manager is busy or unavailable.
+ *
+ * The page is careful about one thing in particular: installing the package
+ * does NOT enrol the laptop. Enrollment consumes a single-use token and creates
+ * an auditable identity, so it needs a person behind it, and a package unpacked
+ * by Ubuntu Software has nobody to ask. An employee who installs and then sees
+ * nothing happen would reasonably conclude it had failed, so the second step is
+ * stated as a step rather than as a footnote.
+ *
+ * Either download may be absent. The server answers 503 per artifact, and the
+ * page offers whatever is actually published rather than linking a 503.
  */
 
 const DOWNLOAD_PATH = "/api/v1/installer/download";
+const DEB_DOWNLOAD_PATH = "/api/v1/installer/deb/download";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;
@@ -35,7 +54,8 @@ function formatSize(bytes: number): string {
 
 export default function EnrollPage() {
   const [installer, setInstaller] = useState<InstallerInfoResponse | null>(null);
-  /** Null while loading, a string once we know the download is unavailable. */
+  const [deb, setDeb] = useState<DebPackageInfoResponse | null>(null);
+  /** Null while loading, a string once we know NEITHER download is available. */
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
@@ -43,23 +63,33 @@ export default function EnrollPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const info = await api.installerInfo();
-        if (!cancelled) setInstaller(info);
-      } catch (caught) {
-        // The server says 503 with a reason when no installer is published.
-        // Shown as prose to the employee rather than as an error code: they
-        // cannot fix it, and the only useful action is to tell somebody.
-        if (!cancelled) {
-          setUnavailable(
-            caught instanceof Error && caught.message
-              ? caught.message
-              : "The agent download is not available on this server.",
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+      // Fetched together and settled independently. The two artifacts are
+      // published separately, so one being absent is a normal deployment state
+      // and must not hide the other. `allSettled` rather than `all` for
+      // exactly that reason: `all` would reject on the missing one and the
+      // page would offer neither.
+      const [scriptResult, debResult] = await Promise.allSettled([
+        api.installerInfo(),
+        api.debInfo(),
+      ]);
+      if (cancelled) return;
+
+      if (scriptResult.status === "fulfilled") setInstaller(scriptResult.value);
+      if (debResult.status === "fulfilled") setDeb(debResult.value);
+
+      // Only an error when there is nothing at all to offer. The server says
+      // 503 with a reason; it is shown as prose rather than as a status code,
+      // because the employee cannot fix it and the only useful action is to
+      // tell somebody.
+      if (scriptResult.status === "rejected" && debResult.status === "rejected") {
+        const reason = scriptResult.reason;
+        setUnavailable(
+          reason instanceof Error && reason.message
+            ? reason.message
+            : "The agent download is not available on this server.",
+        );
       }
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -73,10 +103,14 @@ export default function EnrollPage() {
     });
   }
 
-  const verifyCommand = installer
-    ? `sha256sum ${installer.filename}`
-    : "sha256sum ubuntuguard-agent-installer.sh";
   const runCommand = installer ? `./${installer.filename}` : "./ubuntuguard-agent-installer.sh";
+
+  // The integrity section describes whichever artifact the employee is most
+  // likely to have downloaded, which is the one offered first.
+  const verifiable = deb ?? installer;
+  const verifyCommand = verifiable
+    ? `sha256sum ${verifiable.filename}`
+    : "sha256sum ubuntuguard-agent-installer.sh";
 
   return (
     <div className="enroll-shell">
@@ -95,11 +129,12 @@ export default function EnrollPage() {
         <section className="card">
           <h2>Install the UbuntuGuard agent</h2>
           <p className="muted">
-            Two things are needed: this installer, and a one-time enrollment token from
-            your IT administrator. The installer does everything else.
+            Two things are needed: the download below, and a one-time enrollment token
+            from your IT administrator. Get the token when you are ready — it works once
+            and it expires.
           </p>
 
-          {loading && <p className="muted small">Checking the available download…</p>}
+          {loading && <p className="muted small">Checking the available downloads…</p>}
 
           {unavailable && (
             <div className="banner error">
@@ -112,27 +147,81 @@ export default function EnrollPage() {
             </div>
           )}
 
-          {installer && (
+          {/*
+            The package first: no terminal, and apt brings in usbguard by
+            itself. The one thing it cannot do is enrol, so that is said here
+            rather than left for the employee to discover.
+          */}
+          {deb && (
             <>
-              <a className="download-button" href={DOWNLOAD_PATH} download>
-                Download UbuntuGuard Agent
+              <a className="download-button" href={DEB_DOWNLOAD_PATH} download>
+                Download for Ubuntu ({formatSize(deb.size_bytes)})
               </a>
+              <p className="muted small">
+                Double-click the downloaded file and Ubuntu installs it. Everything it
+                needs comes with it or is fetched by Ubuntu automatically — there is
+                nothing to type.
+              </p>
 
+              <dl className="download-facts">
+                <div>
+                  <dt>Version</dt>
+                  <dd className="mono">{deb.deb_version}</dd>
+                </div>
+                <div>
+                  <dt>For</dt>
+                  <dd className="mono">
+                    Ubuntu {deb.architecture === "amd64" ? "64-bit Intel/AMD" : deb.architecture}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Manages this device for</dt>
+                  <dd className="mono">{deb.server_url}</dd>
+                </div>
+              </dl>
+
+              {deb.enrols_on_install === false && (
+                <div className="banner warn">
+                  <div className="banner-head">
+                    <strong>Installing is step one of two</strong>
+                  </div>
+                  <p>
+                    Installing the package puts the agent on this laptop but does not
+                    register it. Nothing is reported, and no policy applies, until you
+                    open <strong>Enrol this laptop with UbuntuGuard</strong> from your
+                    applications menu and paste your token. That second step exists so
+                    that registering a laptop is always something a person did, with a
+                    token issued to them, rather than something a downloaded file did on
+                    its own.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* The script, offered as the alternative for anyone in a terminal. */}
+          {installer && (
+            <details className="alt-download">
+              <summary>{deb ? "Prefer the terminal? Download the script installer" : "Download the installer"}</summary>
+              <p className="muted small">
+                One command installs and enrols in a single pass, which is quicker if you
+                already have a terminal open. It needs <code>python3-venv</code> and it
+                does not install <code>usbguard</code> for you.
+              </p>
+              <a className="download-button secondary" href={DOWNLOAD_PATH} download>
+                Download the script ({formatSize(installer.size_bytes)})
+              </a>
               <dl className="download-facts">
                 <div>
                   <dt>Version</dt>
                   <dd className="mono">{installer.agent_version}</dd>
                 </div>
                 <div>
-                  <dt>Size</dt>
-                  <dd>{formatSize(installer.size_bytes)}</dd>
-                </div>
-                <div>
                   <dt>Manages this device for</dt>
                   <dd className="mono">{installer.server_url}</dd>
                 </div>
               </dl>
-            </>
+            </details>
           )}
         </section>
 
@@ -190,45 +279,88 @@ export default function EnrollPage() {
         {/* ----------------------------------------------------------------- */}
         <section className="card">
           <h2>How to install it</h2>
-          <ol className="steps numbered">
-            <li>
-              <strong>Ask your administrator for an enrollment token.</strong> It is a
-              long one-time code. It expires, and it works exactly once, so get it when
-              you are ready to install.
-            </li>
-            <li>
-              <strong>Download the installer</strong> using the button above. It saves to
-              your Downloads folder.
-            </li>
-            <li>
-              <strong>Open a terminal</strong> and go to that folder:
-              <br />
-              <code>cd ~/Downloads</code>
-            </li>
-            <li>
-              <strong>Run it:</strong>
-              <br />
-              <code>{runCommand}</code>
-              <br />
-              You will be asked for your own login password first — that is Ubuntu asking
-              permission to install a system service, and it is not the enrollment token.
-            </li>
-            <li>
-              <strong>Paste the enrollment token</strong> when it asks. Nothing appears on
-              screen as you type or paste; that is deliberate.
-            </li>
-          </ol>
 
-          <p className="muted small">
-            That is all. The agent starts straight away and comes back automatically after
-            a reboot. You do not need to keep the installer or the token afterwards.
-          </p>
+          {deb && (
+            <>
+              <h3 className="small-head">Using the Ubuntu package (no terminal)</h3>
+              <ol className="steps numbered">
+                <li>
+                  <strong>Ask your administrator for an enrollment token.</strong> It is a
+                  long one-time code. It expires, and it works exactly once, so get it
+                  when you are ready to install.
+                </li>
+                <li>
+                  <strong>Download the package</strong> using the button above. It saves
+                  to your Downloads folder.
+                </li>
+                <li>
+                  <strong>Double-click the downloaded file.</strong> Ubuntu Software opens
+                  and offers to install it. Press Install and enter your own login
+                  password when asked — that is Ubuntu asking permission to install a
+                  system service, and it is <em>not</em> the enrollment token.
+                </li>
+                <li>
+                  <strong>Open “Enrol this laptop with UbuntuGuard”</strong> from your
+                  applications menu — press the Super key and start typing{" "}
+                  <code>enrol</code>. This is the step that registers the laptop;
+                  installing alone does not.
+                </li>
+                <li>
+                  <strong>Paste the enrollment token</strong> into the box and press OK.
+                  Nothing appears as you type or paste; that is deliberate. You will be
+                  asked for your password once more, then it is done.
+                </li>
+              </ol>
+              <p className="muted small">
+                The agent starts reporting straight away and comes back automatically
+                after a reboot. You do not need to keep the download or the token
+                afterwards.
+              </p>
+            </>
+          )}
+
+          {installer && (
+            <>
+              <h3 className="small-head">
+                {deb ? "Using the script instead (terminal)" : "Installing the agent"}
+              </h3>
+              <ol className="steps numbered">
+                <li>
+                  <strong>Ask your administrator for an enrollment token.</strong>
+                </li>
+                <li>
+                  <strong>Download the script</strong> using the button above.
+                </li>
+                <li>
+                  <strong>Open a terminal</strong> and go to that folder:
+                  <br />
+                  <code>cd ~/Downloads</code>
+                </li>
+                <li>
+                  <strong>Run it:</strong>
+                  <br />
+                  <code>{runCommand}</code>
+                  <br />
+                  You will be asked for your own login password first — that is Ubuntu
+                  asking permission to install a system service, and it is not the
+                  enrollment token.
+                </li>
+                <li>
+                  <strong>Paste the enrollment token</strong> when it asks. Nothing
+                  appears on screen as you type or paste; that is deliberate.
+                </li>
+              </ol>
+              <p className="muted small">
+                This route installs and enrols in one pass, so there is no second step.
+              </p>
+            </>
+          )}
         </section>
 
         {/* ----------------------------------------------------------------- */}
         {/* 4. Optional integrity check                                        */}
         {/* ----------------------------------------------------------------- */}
-        {installer && (
+        {verifiable && (
           <section className="card">
             <h2>Checking the download (optional)</h2>
             <p className="muted">
@@ -243,19 +375,32 @@ export default function EnrollPage() {
             </div>
             <p className="muted small">It should print exactly:</p>
             <div className="token-row">
-              <code className="token break">{installer.sha256}</code>
+              <code className="token break">{verifiable.sha256}</code>
               <button
                 type="button"
                 className="ghost"
-                onClick={() => copy("sha", installer.sha256)}
+                onClick={() => copy("sha", verifiable.sha256)}
               >
                 {copied === "sha" ? "Copied" : "Copy"}
               </button>
             </div>
+            {/*
+              Stated precisely, because "verified" is a word that invites more
+              trust than this earns. A digest published next to a download
+              proves the bytes match what this server holds; it is not a
+              signature, and it does not prove who built them.
+            */}
             <p className="muted small">
-              The installer also checks itself: it verifies the agent embedded inside it
-              before unpacking anything, and refuses to continue if that check fails. This
-              manual step additionally covers the outer file.
+              This compares the file against the digest this server publishes. It is not a
+              package signature — Ubuntu will say the package is from an unknown source
+              when you install it, which is expected for software your own IT team built.
+              {installer && (
+                <>
+                  {" "}
+                  The script installer additionally checks itself: it verifies the agent
+                  embedded inside it before unpacking anything.
+                </>
+              )}
             </p>
           </section>
         )}

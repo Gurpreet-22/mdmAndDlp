@@ -725,6 +725,41 @@ dialog.modal::backdrop {
   filter: brightness(1.08);
 }
 
+/* The script installer, which is now the second choice rather than the only
+   one. Outlined rather than filled: there are two downloads on the page and
+   only one of them should read as the thing to press. */
+.download-button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+.download-button.secondary:hover {
+  background: var(--surface-2);
+  filter: none;
+}
+
+/* Collapsed by default, so the terminal route is available without competing
+   with the double-click one. A <details> rather than a tab or a toggle: it
+   works with no JavaScript and it is keyboard-navigable for free. */
+.alt-download {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+.alt-download > summary {
+  cursor: pointer;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+.alt-download > summary:hover {
+  color: var(--text);
+}
+.alt-download[open] > summary {
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
 /* Version, size and target server, shown beside the download so an employee
    can confirm they have their own company's agent before running it. */
 .download-facts {
