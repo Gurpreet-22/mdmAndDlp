@@ -34,6 +34,44 @@ SERVER_URL="@SERVER_URL@"
 #: truncated and invites someone to "fix" it.
 DIALOG_WIDTH=460
 
+#: Removed by the privileged helper once this laptop has an identity, so the
+#: prompt below stops appearing at login. Named here only so the --autostart
+#: path can explain itself; this script never writes it, because it has no
+#: privilege and should not acquire any for a reminder.
+AUTOSTART_ENTRY="/etc/xdg/autostart/ubuntuguard-enroll.desktop"
+
+# --- how we were started --------------------------------------------------- #
+# --autostart means this is the unprompted reminder at login, not someone
+# choosing to enrol from the applications menu. The difference matters: a
+# password-shaped box that appears on its own, asking for a long secret, is
+# indistinguishable from a phishing dialog and teaches exactly the wrong
+# reflex. So the autostart path explains itself first and offers a way out,
+# and only the person who says yes is shown an entry field.
+AUTOSTART=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --autostart) AUTOSTART=1; shift ;;
+        -h|--help)
+            cat <<EOF
+Enrol this laptop with UbuntuGuard.
+
+  ubuntuguard-enroll              prompt for a token now
+  ubuntuguard-enroll --autostart  ask whether to enrol, then prompt
+
+The enrollment token is typed into a dialog and passed to the privileged
+helper on a pipe. There is deliberately no option to supply it on the command
+line: anything in a command line is readable by every user on this machine
+through /proc.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $1 (try --help)" >&2
+            exit 1
+            ;;
+    esac
+done
+
 # --- no graphical session? ------------------------------------------------- #
 # This program is a GUI wrapper. Run without a display -- over SSH, or from a
 # text console -- it should say what to run instead rather than fail with a
@@ -65,6 +103,55 @@ fi
 
 if ! command -v pkexec >/dev/null 2>&1; then
     die_gui "pkexec is not available, so this application cannot ask for administrator approval.\n\nInstall the <tt>polkitd</tt> package, or contact ${ADMIN_CONTACT}."
+fi
+
+# --- the unprompted reminder ----------------------------------------------- #
+# Shown only on the autostart path. Explains what this is and who it is from
+# before asking for anything, so that an employee who was not expecting it can
+# recognise it -- and so that one who has no token yet can dismiss it without
+# being handed an empty secret field.
+#
+# "Later" is a real answer and costs nothing: the reminder is driven by the
+# presence of ${AUTOSTART_ENTRY}, which only the privileged helper removes, so
+# it comes back at the next login and the laptop stays un-enrolled until
+# somebody enrols it. Nagging someone who does not yet have their token is
+# not how this gets finished sooner.
+if [ "${AUTOSTART}" -eq 1 ]; then
+    # No --icon flag. zenity renamed it: 3.x (Ubuntu 22.04) wants
+    # --window-icon, 4.x wants --icon and warns that --icon-name is
+    # deprecated. Passing any of them means picking a zenity generation, and
+    # an unrecognised flag makes zenity exit non-zero -- which on this code
+    # path is indistinguishable from the employee choosing Later, so the
+    # reminder would silently never appear. The icon is decoration; the
+    # compatibility risk is not worth it.
+    zenity --question \
+        --title="${TITLE}" \
+        --width="${DIALOG_WIDTH}" \
+        --ok-label="Enrol now" \
+        --cancel-label="Later" \
+        --text="$(printf '%s' \
+            "<b>This laptop is not registered yet.</b>\n\n" \
+            "UbuntuGuard is installed, but it will not report anything or apply " \
+            "any policy until this laptop is registered with your organisation.\n\n" \
+            "You need the one-time enrollment token your IT administrator sent " \
+            "you. If you do not have it yet, choose Later and open " \
+            "<b>Enrol this laptop with UbuntuGuard</b> from the applications " \
+            "menu when you do.\n\n" \
+            "<small>Server: ${SERVER_URL}</small>")" \
+        2>/dev/null
+    intro_status=$?
+
+    # 0 is "Enrol now" and falls through to the token prompt. 1 is Later, or
+    # the window being closed, and is a real answer: the reminder returns at
+    # the next login because only the privileged helper removes it.
+    #
+    # Anything else is zenity itself failing, and it is treated as Later
+    # rather than pressed through. Continuing would show a bare secret field
+    # with none of the explanation above it, which is the exact dialog this
+    # branch exists to avoid.
+    if [ "${intro_status}" -ne 0 ]; then
+        exit 0
+    fi
 fi
 
 # --- collect the token ----------------------------------------------------- #

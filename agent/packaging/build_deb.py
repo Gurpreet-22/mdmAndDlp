@@ -234,6 +234,18 @@ HELPER_PATH = "usr/libexec/ubuntuguard/ubuntuguard-enroll-root"
 LAUNCHER_PATH = "usr/bin/ubuntuguard-enroll"
 DESKTOP_PATH = "usr/share/applications/ubuntuguard-enroll.desktop"
 POLICY_PATH = "usr/share/polkit-1/actions/com.ubuntuguard.enroll.policy"
+
+#: The login reminder, shipped INERT here and copied to /etc/xdg/autostart by
+#: postinst only when the laptop has no identity.
+#:
+#: Not shipped straight into /etc/xdg/autostart, which would be simpler and
+#: wrong: dpkg would own it, restore it on every upgrade, and an already
+#: enrolled laptop would start being asked for a token again. Leaving the copy
+#: to postinst and the deletion to the enrollment helper makes the file's
+#: presence mean "still needs enrolling", with only root able to change it and
+#: nothing to fall out of step with.
+AUTOSTART_TEMPLATE_PATH = f"{SHARE_DIR}/ubuntuguard-enroll-autostart.desktop"
+AUTOSTART_INSTALLED_PATH = "etc/xdg/autostart/ubuntuguard-enroll.desktop"
 DOC_DIR = f"usr/share/doc/{PACKAGE_NAME}"
 
 #: Matches install.sh and installer-template.sh. The agent permits exactly two
@@ -651,6 +663,10 @@ def assemble(
     data.add_file(HELPER_PATH, read("ubuntuguard-enroll-root").encode("utf-8"), mode=_MODE_EXEC)
     data.add_file(DESKTOP_PATH, read("ubuntuguard-enroll.desktop").encode("utf-8"))
     data.add_file(POLICY_PATH, read("com.ubuntuguard.enroll.policy").encode("utf-8"))
+    data.add_file(
+        AUTOSTART_TEMPLATE_PATH,
+        read("ubuntuguard-enroll-autostart.desktop").encode("utf-8"),
+    )
     data.add_file(f"{DOC_DIR}/copyright", copyright_text().encode("utf-8"))
 
     data_tar = data.to_gzip()
@@ -855,7 +871,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  wheels         {len(wheels)} bundled, offline install")
     else:
         print("  wheels         none bundled -- the install needs PyPI")
-    print("  enrols         NO -- the employee opens 'Enrol this laptop with UbuntuGuard'")
+    print("  enrols         NO -- installing prompts for a token, it does not enrol")
     return 0
 
 

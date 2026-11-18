@@ -31,7 +31,16 @@ SHARE_DIR="/usr/share/ubuntuguard"
 SOURCE_DIR="${SHARE_DIR}/agent-src"
 WHEEL_DIR="${SHARE_DIR}/wheels"
 CONFIG_DIR="/etc/ubuntuguard"
+STATE_DIR="/var/lib/ubuntuguard"
 SUPPORTED_OS_ID="ubuntu"
+
+#: The login reminder. Copied into place here rather than shipped by dpkg,
+#: because its presence IS the "this laptop still needs enrolling" state and
+#: the privileged enrollment helper deletes it the moment an identity exists.
+#: A dpkg-owned file could not work that way: dpkg would restore it on every
+#: upgrade and an enrolled laptop would start being nagged again.
+AUTOSTART_SOURCE="${SHARE_DIR}/ubuntuguard-enroll-autostart.desktop"
+AUTOSTART_ENTRY="/etc/xdg/autostart/ubuntuguard-enroll.desktop"
 
 case "$1" in
     configure)
@@ -136,13 +145,84 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications 2>/dev/null || true
 fi
 
+# --- the enrollment prompt ------------------------------------------------- #
+# Installing must not enrol, but it should not leave the employee hunting
+# through a menu either. So the package arranges for the prompt to come to
+# them, by two routes, neither of which enrols anything by itself.
+#
+# Both are skipped when this laptop already has an identity, which is the
+# normal case on an upgrade: re-asking an enrolled laptop for a token would be
+# a prompt whose only correct answer is to close it.
+already_enrolled() {
+    [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ]
+}
+
+if already_enrolled; then
+    echo "ubuntuguard-agent: this laptop is already enrolled; not prompting"
+    rm -f "${AUTOSTART_ENTRY}"
+else
+    # Route one, and the reliable one: a login reminder. It explains itself and
+    # offers "Later" before showing any entry field, and it keeps coming back
+    # until somebody enrols, because the enrollment helper is what removes it.
+    if [ -f "${AUTOSTART_SOURCE}" ]; then
+        install -d -m 0755 /etc/xdg/autostart
+        install -m 0644 -o root -g root "${AUTOSTART_SOURCE}" "${AUTOSTART_ENTRY}"
+    fi
+
+    # Route two, best effort: show it now, so that installing and enrolling
+    # feel like one action rather than two.
+    #
+    # Best effort really does mean that. postinst runs as root with no session
+    # of its own -- under GNOME Software it runs inside packagekitd -- so
+    # reaching the employee's display means finding their session and
+    # borrowing its bus. If any step fails, the reminder above still fires at
+    # the next login and the applications menu entry is always there. Nothing
+    # is reported as an error, because nothing has gone wrong.
+    #
+    # `loginctl` is asked which session is actually active rather than
+    # guessing DISPLAY=:0, which is wrong on Wayland, wrong with more than one
+    # seat, and wrong when the installing user is not the logged-in one.
+    if command -v loginctl >/dev/null 2>&1 && command -v systemd-run >/dev/null 2>&1; then
+        session="$(loginctl list-sessions --no-legend 2>/dev/null \
+            | awk '{print $1}' \
+            | while read -r candidate; do
+                  [ -n "${candidate}" ] || continue
+                  if [ "$(loginctl show-session "${candidate}" -p Active --value 2>/dev/null)" = "yes" ] \
+                  && [ "$(loginctl show-session "${candidate}" -p Type --value 2>/dev/null)" != "tty" ]; then
+                      printf '%s' "${candidate}"
+                      break
+                  fi
+              done)"
+
+        if [ -n "${session:-}" ]; then
+            session_uid="$(loginctl show-session "${session}" -p User --value 2>/dev/null || true)"
+            if [ -n "${session_uid}" ] && [ -S "/run/user/${session_uid}/bus" ]; then
+                # Detached into the user's own systemd instance so it does not
+                # become a child of dpkg. A GUI left as dpkg's child would keep
+                # apt waiting on a dialog nobody has answered yet, and GNOME
+                # Software would sit at 99% until they did.
+                systemd-run \
+                    --quiet \
+                    --collect \
+                    --uid="${session_uid}" \
+                    --setenv=DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${session_uid}/bus" \
+                    --setenv=XDG_RUNTIME_DIR="/run/user/${session_uid}" \
+                    /usr/bin/ubuntuguard-enroll --autostart \
+                    >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+fi
+
 cat <<'EOF'
 
 UbuntuGuard agent installed. This laptop is NOT yet enrolled.
 
-  To finish, open "Enrol this laptop with UbuntuGuard" from your
-  applications menu and paste the one-time token your administrator
-  sent you. Nothing starts reporting until that is done.
+  A window should appear asking for your one-time enrollment token. If
+  it does not, open "Enrol this laptop with UbuntuGuard" from your
+  applications menu and paste the token your administrator sent you.
+
+  Nothing is reported and no policy applies until that is done.
 
 EOF
 

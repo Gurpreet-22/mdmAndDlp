@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=UbuntuGuard enrollment reminder
+Comment=Asks to register this laptop until it has been registered
+# --autostart, so the script knows this is the unprompted reminder rather than
+# someone choosing to enrol from the applications menu. It explains itself and
+# offers "Later" before showing any entry field; a bare secret box appearing on
+# its own is indistinguishable from a phishing dialog.
+Exec=/usr/bin/ubuntuguard-enroll --autostart
+Terminal=false
+NoDisplay=true
+# This file is NOT shipped into /etc/xdg/autostart by dpkg. postinst copies it
+# there only when the laptop has no device identity, and the privileged
+# enrollment helper deletes that copy the moment one exists. The presence of
+# the copy IS the "still needs enrolling" state, which is why there is no flag
+# file anywhere: only root can create or remove it, and it cannot disagree with
+# reality the way a separate marker could.
+X-GNOME-Autostart-enabled=true
+# A few seconds in, so the reminder does not race the shell for the screen on
+# a cold login and land behind it.
+X-GNOME-Autostart-Delay=8

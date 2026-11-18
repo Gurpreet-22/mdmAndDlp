@@ -48,6 +48,17 @@ STATE_DIR="/var/lib/ubuntuguard"
 SERVICE_NAME="ubuntuguard-agent"
 ENFORCER_NAME="ubuntuguard-enforcerd"
 
+#: The login reminder, which postinst installs when the laptop has no identity.
+#: Deleting it here is what stops it: its presence IS the "still needs
+#: enrolling" state, so there is no separate flag file to fall out of step with
+#: reality. Only root can write this path, which is why the unprivileged
+#: launcher never touches it.
+AUTOSTART_ENTRY="/etc/xdg/autostart/ubuntuguard-enroll.desktop"
+
+stop_reminding() {
+    rm -f "${AUTOSTART_ENTRY}"
+}
+
 # Absolute paths throughout. pkexec resets the environment, including PATH, so
 # a bare `systemctl` here would depend on a PATH this script does not control.
 RUNUSER="/usr/sbin/runuser"
@@ -89,6 +100,10 @@ fi
 # service account, so an unprivileged process cannot see inside it.
 if [ -f "${STATE_DIR}/pki/device.key" ] && [ -f "${STATE_DIR}/pki/device.crt" ]; then
     echo "This laptop already has a device identity; not re-enrolling."
+    # Whatever else is true, it does not need reminding. Reached when an
+    # enrollment happened by another route -- the script installer, or an
+    # administrator at a terminal -- and the login reminder is still in place.
+    stop_reminding
     # Still ensure the services are up: a laptop that enrolled but whose
     # services were stopped is the most likely reason someone opens this
     # application a second time.
@@ -123,8 +138,17 @@ if ! printf '%s' "${token}" \
         "${RUNUSER}" -u "${AGENT_USER}" -- "${AGENT_BIN}" enroll --token-stdin; then
     # The agent has already printed the specific reason -- expired, already
     # used, revoked, unreachable -- on stderr, which the launcher shows.
+    #
+    # The reminder deliberately stays in place: the laptop is still
+    # un-enrolled, so it still needs enrolling, and a failed attempt is
+    # exactly when the prompt should come back.
     exit 12
 fi
+
+# Enrolled. Stop reminding before starting the services, so that a laptop
+# which enrolled but whose services fail to start is not also nagged about
+# enrollment it has already completed.
+stop_reminding
 
 # --- start ----------------------------------------------------------------- #
 # The enforcer first: it owns the Unix socket the agent connects to, so

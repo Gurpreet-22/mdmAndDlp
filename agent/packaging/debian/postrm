@@ -33,6 +33,12 @@ CONFIG_DIR="/etc/ubuntuguard"
 STATE_DIR="/var/lib/ubuntuguard"
 UNIT_DIR="/etc/systemd/system"
 
+#: The login reminder postinst copies into place. Not dpkg-owned -- its
+#: presence is the "still needs enrolling" state -- so dpkg will not remove it
+#: and this script must, or every login after an uninstall would ask the
+#: employee to enrol a laptop that no longer has an agent.
+AUTOSTART_ENTRY="/etc/xdg/autostart/ubuntuguard-enroll.desktop"
+
 remove_units() {
     # Both units, including the enforcer. uninstall.sh still removes only the
     # agent unit -- it predates the root enforcer -- so this does not delegate
@@ -49,6 +55,7 @@ remove_units() {
 case "$1" in
     remove)
         remove_units
+        rm -f "${AUTOSTART_ENTRY}"
         # The virtualenv is generated, not shipped, so dpkg will not remove it.
         rm -rf "${VENV_PARENT}"
         cat <<EOF
@@ -64,6 +71,7 @@ EOF
 
     purge)
         remove_units
+        rm -f "${AUTOSTART_ENTRY}"
         rm -rf "${VENV_PARENT}"
 
         # The key material. This is the irreversible step, and it is reached

@@ -283,16 +283,32 @@ def test_postinst_does_not_enrol(built: tuple[bytes, dict[str, object]]) -> None
     """The constraint that kept the employee artifact a script for so long.
 
     Enrollment consumes a single-use token and creates an auditable identity,
-    so it must not be a side effect of unpacking a package. Comment lines are
-    stripped before the check, because the script explains at length why it
-    does not enrol and the word appears throughout that explanation.
+    so it must not be a side effect of unpacking a package.
+
+    What counts as enrolling is worth being precise about: the claim is that
+    postinst never invokes the AGENT's enroll subcommand and never handles a
+    token. It does launch the enrollment *dialog*, which is not the same
+    thing -- the dialog asks a person for a token postinst neither has nor can
+    obtain, and a person who closes it leaves the laptop un-enrolled. An
+    assertion on the bare word "enroll" would forbid that, and would have
+    forbidden shipping the applications-menu entry too.
+
+    Comment lines are stripped first, because the script explains at length
+    why it does not enrol and the word appears throughout that explanation.
     """
     artifact, _ = built
     postinst = _tar_file(_control(artifact), "postinst").decode()
     code = [
         line for line in postinst.splitlines() if line.strip() and not line.lstrip().startswith("#")
     ]
-    offenders = [line for line in code if re.search(r"\benroll\b", line)]
+    forbidden = (
+        r"ubuntuguard-agent\s+enroll",
+        r"--token-stdin",
+        r"--token-prompt",
+        r"--token\b",
+        r"enroll\s+--token",
+    )
+    offenders = [line for line in code if any(re.search(p, line) for p in forbidden)]
     assert offenders == [], f"postinst appears to enrol: {offenders}"
 
 
@@ -321,6 +337,142 @@ def test_the_enrollment_capability_is_in_the_desktop_application(
 
     helper = _tar_file(_data(artifact), builder.HELPER_PATH).decode()
     assert "--token-stdin" in helper, "the helper must hand the token to the agent on stdin"
+
+
+def test_the_prompt_comes_to_the_employee_rather_than_waiting_in_a_menu(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """Installing must not enrol, but it must not hide the next step either.
+
+    The package ships a login reminder and postinst copies it into
+    /etc/xdg/autostart when the laptop has no identity, so the prompt appears
+    on its own. Without this the employee has to know to go looking through the
+    applications menu, which is the difference between an install that finishes
+    itself and one that silently does nothing.
+    """
+    artifact, _ = built
+    shipped = _tar_entries(_data(artifact))
+    assert builder.AUTOSTART_TEMPLATE_PATH in shipped
+
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    assert f"/{builder.AUTOSTART_INSTALLED_PATH}" in postinst
+
+
+def test_the_reminder_is_not_shipped_into_autostart_directly(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """dpkg must not own the reminder.
+
+    If it did, dpkg would restore it on every upgrade and a laptop that had
+    already enrolled would start being asked for a token again. The copy is
+    postinst's to make and the enrollment helper's to delete, which is what
+    lets the file's presence mean "still needs enrolling".
+    """
+    artifact, _ = built
+    shipped = _tar_entries(_data(artifact))
+    assert builder.AUTOSTART_INSTALLED_PATH not in shipped
+
+    conffiles = _tar_file(_control(artifact), "conffiles").decode().split()
+    assert f"/{builder.AUTOSTART_INSTALLED_PATH}" not in conffiles
+
+
+def test_enrolling_stops_the_reminder(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """Otherwise the prompt would reappear at every login forever.
+
+    Removed by the privileged helper rather than the launcher, because the
+    launcher is unprivileged and must not acquire root for a reminder.
+    """
+    artifact, _ = built
+    helper = _expand_shell_variables(_tar_file(_data(artifact), builder.HELPER_PATH).decode())
+    assert f"rm -f /{builder.AUTOSTART_INSTALLED_PATH}" in helper
+
+    # The launcher does delete things -- its own mktemp scratch files, through
+    # a trap -- so the claim is specifically that it does not touch the
+    # reminder, which lives under /etc and needs root.
+    launcher = _expand_shell_variables(_tar_file(_data(artifact), builder.LAUNCHER_PATH).decode())
+    removals = [
+        line
+        for line in launcher.splitlines()
+        if "rm " in line and builder.AUTOSTART_INSTALLED_PATH in line
+    ]
+    assert removals == [], f"the unprivileged launcher must not delete it: {removals}"
+
+
+def test_an_already_enrolled_laptop_is_not_prompted(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """The normal case on an upgrade.
+
+    Asking an enrolled laptop for an enrollment token is a dialog whose only
+    correct answer is to close it, so postinst checks for an existing identity
+    before arranging any prompt.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    assert "already_enrolled" in postinst
+    assert "/var/lib/ubuntuguard/pki/device.key" in postinst
+
+
+def test_removal_takes_the_reminder_away(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """dpkg will not do it: the file is not dpkg-owned.
+
+    Left behind, it would ask the employee at every login to enrol a laptop
+    whose agent has been removed.
+    """
+    artifact, _ = built
+    postrm = _expand_shell_variables(_tar_file(_control(artifact), "postrm").decode())
+    for branch in ("    remove)", "    purge)"):
+        section = postrm.partition(branch)[2].partition(";;")[0]
+        assert section, f"postrm has no {branch.strip()} branch"
+        assert f"rm -f /{builder.AUTOSTART_INSTALLED_PATH}" in section, branch
+
+
+def test_the_unprompted_prompt_explains_itself_before_asking_for_a_secret(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """A secret field that appears on its own teaches the wrong reflex.
+
+    A password-shaped box asking for a long code, with no explanation and no
+    way out, is indistinguishable from a phishing dialog. On the autostart
+    path the launcher explains what it is and offers Later, and only someone
+    who agrees is shown an entry field.
+    """
+    artifact, _ = built
+    launcher = _tar_file(_data(artifact), builder.LAUNCHER_PATH).decode()
+    assert "--autostart" in launcher
+    assert "--question" in launcher, "the autostart path must ask before it prompts"
+    assert "Later" in launcher
+
+    autostart = _tar_file(_data(artifact), builder.AUTOSTART_TEMPLATE_PATH).decode()
+    assert "--autostart" in autostart, "the reminder must use the self-explaining path"
+    assert f"Exec=/{builder.LAUNCHER_PATH} --autostart" in autostart
+
+
+def test_postinst_does_not_block_dpkg_on_a_dialog(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """A GUI left as dpkg's child would keep apt waiting on an unanswered
+    dialog, and GNOME Software would sit at 99% until the employee answered.
+
+    The immediate prompt is handed to the user's own systemd instance, which
+    detaches it from dpkg's process tree.
+    """
+    artifact, _ = built
+    postinst = _tar_file(_control(artifact), "postinst").decode()
+    launches = [
+        line
+        for line in postinst.splitlines()
+        if "ubuntuguard-enroll" in line and not line.lstrip().startswith("#")
+    ]
+    assert launches, "postinst never tries to show the prompt"
+    assert "systemd-run" in postinst
+    # Every attempt is tolerant of failure: the login reminder is the reliable
+    # route, and a desktop that cannot be reached is not an install failure.
+    assert "|| true" in postinst
 
 
 def test_the_helper_never_takes_the_token_as_an_argument(
