@@ -85,6 +85,97 @@ if [ ! -f "${SOURCE_DIR}/pyproject.toml" ]; then
     exit 1
 fi
 
+# --- do not lock the employee out of their own USB devices ----------------- #
+# FIRST, before the virtualenv is built, and the order is the point.
+#
+# apt configures dependencies before the package that needs them, so usbguard
+# is already installed and running by the time this script starts. Until the
+# baseline below is written it is running with an empty ruleset, which blocks
+# every USB device on the machine. Building the virtualenv takes minutes, so
+# seeding afterwards meant minutes of a dead external keyboard, mouse and
+# webcam on a laptop that was merely installing software. Seeding first makes
+# that window under a second.
+#
+# This matters most on exactly the machine where it is hardest to recover: a
+# brand new laptop, where usbguard is freshly installed and has no rules at
+# all, and where the person watching has no idea the package manager is the
+# reason their mouse stopped.
+#
+# usbguard's own defaults, read from the package rather than assumed:
+#
+#   ImplicitPolicyTarget=block      anything not matching a rule is blocked
+#   PresentDevicePolicy=apply-policy  already-connected devices are included
+#   RuleFile=/etc/usbguard/rules.conf
+#
+# and the package ships no rules.conf at all, only an empty rules.d directory.
+# An empty ruleset plus an implicit block plus apply-policy means every USB
+# device attached to the laptop is deauthorized the moment usbguard starts: an
+# external keyboard and mouse, a USB webcam, an internal bluetooth or
+# fingerprint reader on a USB bus. PresentControllerPolicy=keep spares the
+# controllers, not the devices.
+#
+# That would be this package breaking the machine it was installed to protect,
+# before it has been enrolled or given any policy at all.
+#
+# So a baseline is seeded: allow what is plugged in right now. This is
+# usbguard's own documented bootstrap, and it is written only when there is no
+# ruleset to overwrite -- an administrator's existing rules.conf is left
+# exactly alone.
+#
+# It does not weaken anything. Until an administrator sets a policy there is
+# nothing to enforce, and the agent's whole model is default-allow outside the
+# protected device classes. When a policy does arrive the enforcer replaces
+# this file with the derived ruleset.
+#
+# usbguard-daemon.conf is deliberately NOT touched. It is a conffile owned by
+# the usbguard package; editing another package's conffile would provoke dpkg
+# prompts on their upgrades and silently change a security setting an
+# administrator may have chosen. rules.conf is shipped by nobody, so creating
+# it is ours to do.
+USBGUARD_RULES="/etc/usbguard/rules.conf"
+
+seed_usbguard_baseline() {
+    command -v usbguard >/dev/null 2>&1 || return 0
+
+    # Present and non-empty means somebody -- an administrator, or a previous
+    # install of this package -- already decided. Leave it.
+    if [ -s "${USBGUARD_RULES}" ]; then
+        echo "ubuntuguard-agent: keeping the existing ${USBGUARD_RULES}"
+        return 0
+    fi
+
+    generated="$(usbguard generate-policy 2>/dev/null || true)"
+    if [ -z "${generated}" ]; then
+        # No devices enumerated, or usbguard cannot read sysfs. Writing an
+        # empty file here would be the lockout this function exists to
+        # prevent, so nothing is written and the operator is told.
+        echo "ubuntuguard-agent: WARNING: could not generate a usbguard baseline." >&2
+        echo "  usbguard blocks every device when its ruleset is empty. Before" >&2
+        echo "  starting it, run: usbguard generate-policy > ${USBGUARD_RULES}" >&2
+        return 0
+    fi
+
+    echo "ubuntuguard-agent: seeding ${USBGUARD_RULES} with the devices present now"
+    install -d -m 0755 -o root -g root /etc/usbguard
+    # 0600 root: the ruleset names every device on the machine, and usbguard
+    # refuses a world-readable one.
+    printf '%s\n' "${generated}" > "${USBGUARD_RULES}.ubuntuguard-new"
+    chmod 0600 "${USBGUARD_RULES}.ubuntuguard-new"
+    chown root:root "${USBGUARD_RULES}.ubuntuguard-new"
+    mv -f "${USBGUARD_RULES}.ubuntuguard-new" "${USBGUARD_RULES}"
+
+    # Re-apply, because usbguard has already started against the empty
+    # ruleset and will have deauthorized things. A restart re-reads the file
+    # and re-authorizes everything the baseline allows.
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet usbguard.service 2>/dev/null; then
+            systemctl restart usbguard.service >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+seed_usbguard_baseline
+
 # --- a virtualenv built for a different Python is not reusable -------------- #
 # install.sh reuses an existing /opt/ubuntuguard/venv rather than rebuilding
 # it, which is right: rebuilding on every upgrade would be slow and would throw
@@ -208,84 +299,6 @@ fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications 2>/dev/null || true
 fi
-
-# --- do not lock the employee out of their own USB devices ----------------- #
-# This package Depends on usbguard, so apt installs and STARTS usbguard before
-# this script runs. usbguard's own defaults, read from the package rather than
-# assumed:
-#
-#   ImplicitPolicyTarget=block      anything not matching a rule is blocked
-#   PresentDevicePolicy=apply-policy  already-connected devices are included
-#   RuleFile=/etc/usbguard/rules.conf
-#
-# and the package ships no rules.conf at all, only an empty rules.d directory.
-# An empty ruleset plus an implicit block plus apply-policy means every USB
-# device attached to the laptop is deauthorized the moment usbguard starts: an
-# external keyboard and mouse, a USB webcam, an internal bluetooth or
-# fingerprint reader on a USB bus. PresentControllerPolicy=keep spares the
-# controllers, not the devices.
-#
-# That would be this package breaking the machine it was installed to protect,
-# before it has been enrolled or given any policy at all.
-#
-# So a baseline is seeded: allow what is plugged in right now. This is
-# usbguard's own documented bootstrap, and it is written only when there is no
-# ruleset to overwrite -- an administrator's existing rules.conf is left
-# exactly alone.
-#
-# It does not weaken anything. Until an administrator sets a policy there is
-# nothing to enforce, and the agent's whole model is default-allow outside the
-# protected device classes. When a policy does arrive the enforcer replaces
-# this file with the derived ruleset.
-#
-# usbguard-daemon.conf is deliberately NOT touched. It is a conffile owned by
-# the usbguard package; editing another package's conffile would provoke dpkg
-# prompts on their upgrades and silently change a security setting an
-# administrator may have chosen. rules.conf is shipped by nobody, so creating
-# it is ours to do.
-USBGUARD_RULES="/etc/usbguard/rules.conf"
-
-seed_usbguard_baseline() {
-    command -v usbguard >/dev/null 2>&1 || return 0
-
-    # Present and non-empty means somebody -- an administrator, or a previous
-    # install of this package -- already decided. Leave it.
-    if [ -s "${USBGUARD_RULES}" ]; then
-        echo "ubuntuguard-agent: keeping the existing ${USBGUARD_RULES}"
-        return 0
-    fi
-
-    generated="$(usbguard generate-policy 2>/dev/null || true)"
-    if [ -z "${generated}" ]; then
-        # No devices enumerated, or usbguard cannot read sysfs. Writing an
-        # empty file here would be the lockout this function exists to
-        # prevent, so nothing is written and the operator is told.
-        echo "ubuntuguard-agent: WARNING: could not generate a usbguard baseline." >&2
-        echo "  usbguard blocks every device when its ruleset is empty. Before" >&2
-        echo "  starting it, run: usbguard generate-policy > ${USBGUARD_RULES}" >&2
-        return 0
-    fi
-
-    echo "ubuntuguard-agent: seeding ${USBGUARD_RULES} with the devices present now"
-    install -d -m 0755 -o root -g root /etc/usbguard
-    # 0600 root: the ruleset names every device on the machine, and usbguard
-    # refuses a world-readable one.
-    printf '%s\n' "${generated}" > "${USBGUARD_RULES}.ubuntuguard-new"
-    chmod 0600 "${USBGUARD_RULES}.ubuntuguard-new"
-    chown root:root "${USBGUARD_RULES}.ubuntuguard-new"
-    mv -f "${USBGUARD_RULES}.ubuntuguard-new" "${USBGUARD_RULES}"
-
-    # Re-apply, because usbguard has already started against the empty
-    # ruleset and will have deauthorized things. A restart re-reads the file
-    # and re-authorizes everything the baseline allows.
-    if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-active --quiet usbguard.service 2>/dev/null; then
-            systemctl restart usbguard.service >/dev/null 2>&1 || true
-        fi
-    fi
-}
-
-seed_usbguard_baseline
 
 # --- the enrollment prompt ------------------------------------------------- #
 # Installing must not enrol, but it should not leave the employee hunting

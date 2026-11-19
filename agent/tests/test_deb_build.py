@@ -426,6 +426,31 @@ def test_postinst_seeds_a_usbguard_baseline_so_the_install_cannot_lock_usb_out(
     assert "/etc/usbguard/rules.conf" in postinst
 
 
+def test_the_usbguard_baseline_is_seeded_before_the_slow_virtualenv_build(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """Ordering, and it is not cosmetic.
+
+    apt configures dependencies first, so usbguard is already running with an
+    empty ruleset -- blocking every USB device -- by the time postinst starts.
+    Building the virtualenv takes minutes. Seeding the baseline after it meant
+    minutes of a dead external keyboard, mouse and webcam on a machine that
+    was only installing software, and on a brand new laptop that is also the
+    machine where nobody would guess the package manager was the cause.
+    """
+    artifact, _ = built
+    postinst = _tar_file(_control(artifact), "postinst").decode()
+    code = [
+        line for line in postinst.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    ]
+    seed_at = next(i for i, line in enumerate(code) if line.strip() == "seed_usbguard_baseline")
+    install_at = next(i for i, line in enumerate(code) if "packaging/install.sh" in line)
+    assert seed_at < install_at, (
+        "the usbguard baseline must be seeded before install.sh builds the virtualenv, "
+        "or USB stays blocked for the duration of the build"
+    )
+
+
 def test_the_baseline_never_overwrites_an_existing_ruleset(
     built: tuple[bytes, dict[str, object]],
 ) -> None:
