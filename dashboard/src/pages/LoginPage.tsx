@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import ErrorBanner from "../components/ErrorBanner";
+import Brand from "../components/Brand";
 import { api } from "../api/client";
 import { useAuth } from "../auth";
 
@@ -50,10 +51,7 @@ export default function LoginPage() {
   return (
     <div className="centred">
       <form className="card login" onSubmit={submit}>
-        <div className="brand large">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>UbuntuGuard</span>
-        </div>
+        <Brand size="large" />
         <p className="muted">Sign in to the management console.</p>
 
         {anyLogin === true && (

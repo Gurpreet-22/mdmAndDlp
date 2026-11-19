@@ -6,17 +6,65 @@
  * the whole look in one readable file.
  */
 
+/*
+ * Light theme.
+ *
+ * Every colour in this file is one of the custom properties below -- there are
+ * no literal colours past this block, which is what makes the theme a single
+ * edit rather than a search through 800 lines. The semantic tints
+ * (--good-bg, --warn-border, ...) exist for the same reason: the pills and
+ * banners used to hardcode rgba() of the status colours, which silently
+ * stopped working the moment the surface went from near-black to white.
+ *
+ * Contrast: --muted, --good, --warn, --bad and --accent are all at least
+ * 4.5:1 on --surface, and --on-accent is 5.3:1 on --accent, so body text and
+ * button labels meet WCAG AA. A console that lists which laptops are
+ * non-compliant is read in bright rooms on bad screens.
+ *
+ * --accent is the one brand decision here and the only line to change if
+ * Seesec has a defined brand colour. It is deliberately a blue rather than
+ * the old Ubuntu-ish orange: orange on white needs a dark label to stay
+ * legible, which reads as a warning rather than an action.
+ */
 :root {
-  --bg: #0f1216;
-  --surface: #171b21;
-  --surface-2: #1d222a;
-  --border: #2a313b;
-  --text: #e6e9ee;
-  --muted: #8b95a4;
-  --accent: #e8743c; /* Ubuntu-ish orange, not the official mark */
-  --good: #3fb950;
-  --warn: #d29922;
-  --bad: #f85149;
+  /* surfaces, lightest to darkest */
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --border: #d8dee6;
+
+  /* text */
+  --text: #111820;
+  --muted: #5a6573;
+
+  /* brand */
+  --accent: #1f5fd0;
+  --on-accent: #ffffff;
+  --accent-ring: rgba(31, 95, 208, 0.22);
+  --accent-ring-strong: rgba(31, 95, 208, 0.55);
+
+  /* status. Darker than the dark theme's, because these sit on white. */
+  --good: #1a7f37;
+  --warn: #8a5d00;
+  --bad: #c0271d;
+  --on-danger: #ffffff;
+
+  /* status tints for pills and banners */
+  --good-border: rgba(26, 127, 55, 0.35);
+  --good-bg: rgba(26, 127, 55, 0.08);
+  --warn-border: rgba(138, 93, 0, 0.35);
+  --warn-bg: rgba(138, 93, 0, 0.09);
+  --bad-border: rgba(192, 39, 29, 0.35);
+  --bad-bg: rgba(192, 39, 29, 0.07);
+
+  /* structure */
+  --row-border: rgba(17, 24, 32, 0.08);
+  --row-hover: rgba(31, 95, 208, 0.045);
+  --chip-bg: rgba(17, 24, 32, 0.05);
+  --overlay: rgba(17, 24, 32, 0.45);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 6px 20px rgba(16, 24, 40, 0.1);
+
   --radius: 8px;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 }
@@ -78,6 +126,7 @@ code,
 }
 
 .topbar {
+  box-shadow: var(--shadow-sm);
   display: flex;
   align-items: center;
   gap: 1.5rem;
@@ -87,44 +136,86 @@ code,
   flex-wrap: wrap;
 }
 
+/* ----------------------------------------------------------------- brand --- */
+/* The mark is an <img> of a single swappable asset, so it is sized by height
+   and left to keep its own aspect ratio -- a replacement logo that is wider
+   than it is tall must not be squashed into a square. */
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 .brand.large {
-  font-size: 1.25rem;
-  margin-bottom: 0.25rem;
+  gap: 0.7rem;
+  margin-bottom: 0.4rem;
 }
 .brand-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(232, 116, 60, 0.18);
+  height: 22px;
+  width: auto;
+  display: block;
+  flex: none;
+}
+.brand.large .brand-mark {
+  height: 34px;
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.brand-name {
+  font-size: 1rem;
+}
+.brand.large .brand-name {
+  font-size: 1.3rem;
+}
+/* Small, muted and never bold: it says who the vendor is without competing
+   with the product name for the same glance. */
+.brand-vendor {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+/* ------------------------------------------------------------------ icons --- */
+/* Inline SVG inheriting `currentColor`, so an icon in a red pill is red with
+   no extra rule. `flex: none` stops it being squeezed when a label wraps. */
+.icon {
+  flex: none;
+  vertical-align: -0.18em;
 }
 
 .nav {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.2rem;
   margin-right: auto;
 }
 .nav-link {
-  padding: 0.4rem 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.7rem;
   border-radius: var(--radius);
   color: var(--muted);
+  font-weight: 500;
 }
 .nav-link:hover {
   background: var(--surface-2);
   color: var(--text);
   text-decoration: none;
 }
+/* The active tab carries both a tint and the accent underline. Colour alone
+   would be the only signal for anyone who cannot distinguish it. */
 .nav-link.active {
   background: var(--surface-2);
-  color: var(--text);
+  color: var(--accent);
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+.nav-link.active .icon {
+  color: var(--accent);
 }
 
 .session {
@@ -183,11 +274,12 @@ code,
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   padding: 1.1rem;
   margin-bottom: 1.1rem;
 }
 .card.danger {
-  border-color: rgba(248, 81, 73, 0.4);
+  border-color: var(--bad-border);
 }
 .table-card {
   padding: 1.1rem 0 0.5rem;
@@ -235,6 +327,7 @@ code,
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   padding: 0.75rem 0.9rem;
 }
 .stat-value {
@@ -262,7 +355,7 @@ label {
 
 input,
 select {
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -272,13 +365,23 @@ select {
 }
 input:focus,
 select:focus {
-  outline: 2px solid rgba(232, 116, 60, 0.5);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* Keyboard focus on anything else still gets a visible ring. Removing the
+   outline above without this would make the console unusable by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--accent-ring-strong);
+  outline-offset: 2px;
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   background: var(--accent);
-  color: #1a1004;
+  color: var(--on-accent);
   border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 0.5rem 0.9rem;
@@ -302,7 +405,7 @@ button.ghost {
 }
 button.danger {
   background: var(--bad);
-  color: #230605;
+  color: var(--on-danger);
 }
 button.small {
   padding: 0.3rem 0.6rem;
@@ -347,11 +450,11 @@ th {
 }
 td {
   padding: 0.6rem 1.1rem;
-  border-bottom: 1px solid rgba(42, 49, 59, 0.6);
+  border-bottom: 1px solid var(--row-border);
   vertical-align: top;
 }
 tbody tr:hover {
-  background: rgba(29, 34, 42, 0.5);
+  background: var(--row-hover);
 }
 
 .detail-cell code {
@@ -379,7 +482,7 @@ dl {
   grid-template-columns: minmax(130px, 34%) 1fr;
   gap: 0.6rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid rgba(42, 49, 59, 0.5);
+  border-bottom: 1px solid var(--row-border);
 }
 .field:last-child {
   border-bottom: none;
@@ -408,8 +511,8 @@ dd {
 .pill.online,
 .pill.active {
   color: var(--good);
-  border-color: rgba(63, 185, 80, 0.4);
-  background: rgba(63, 185, 80, 0.1);
+  border-color: var(--good-border);
+  background: var(--good-bg);
 }
 .pill.offline,
 .pill.neutral,
@@ -421,13 +524,13 @@ dd {
 .pill.warn,
 .pill.expired {
   color: var(--warn);
-  border-color: rgba(210, 153, 34, 0.4);
-  background: rgba(210, 153, 34, 0.1);
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 .pill.revoked {
   color: var(--bad);
-  border-color: rgba(248, 81, 73, 0.4);
-  background: rgba(248, 81, 73, 0.1);
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
 }
 
 /* --------------------------------------------------------------- banners --- */
@@ -448,22 +551,22 @@ dd {
   flex-wrap: wrap;
 }
 .banner.error {
-  border-color: rgba(248, 81, 73, 0.45);
-  background: rgba(248, 81, 73, 0.08);
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
 }
 .banner.success {
-  border-color: rgba(63, 185, 80, 0.45);
-  background: rgba(63, 185, 80, 0.08);
+  border-color: var(--good-border);
+  background: var(--good-bg);
 }
 .banner.warn {
-  border-color: rgba(210, 153, 34, 0.45);
-  background: rgba(210, 153, 34, 0.08);
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 
 .code-chip {
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--chip-bg);
   border: 1px solid var(--border);
   font-size: 0.74rem;
 }
@@ -499,6 +602,7 @@ dd {
  */
 dialog.modal {
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
@@ -508,7 +612,7 @@ dialog.modal {
   overflow: auto;
 }
 dialog.modal::backdrop {
-  background: rgba(6, 8, 11, 0.72);
+  background: var(--overlay);
 }
 .modal-head {
   display: flex;
@@ -714,7 +818,7 @@ dialog.modal::backdrop {
   margin: 1rem 0 0.25rem;
   padding: 0.85rem 1rem;
   background: var(--accent);
-  color: #1a1004;
+  color: var(--on-accent);
   border-radius: var(--radius);
   font-weight: 600;
   font-size: 1.02rem;

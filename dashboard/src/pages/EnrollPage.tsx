@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
+import Brand from "../components/Brand";
 import type { DebPackageInfoResponse, InstallerInfoResponse } from "../api/client";
 
 /**
@@ -126,10 +127,7 @@ export default function EnrollPage() {
   return (
     <div className="enroll-shell">
       <header className="enroll-head">
-        <div className="brand large">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>UbuntuGuard</span>
-        </div>
+        <Brand size="large" />
         <p className="muted">Device enrollment for company Ubuntu laptops.</p>
       </header>
 

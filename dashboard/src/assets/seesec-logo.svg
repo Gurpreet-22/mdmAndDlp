@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
+     fill="none" stroke="#1f5fd0" stroke-width="2.1"
+     stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Seesec">
+  <!--
+    PLACEHOLDER MARK - not Seesec's real logo.
+
+    Drawn here because no brand asset was available: seesec.io serves only an
+    nginx redirect, and the logo on git.seesec.io is Gitea's own teacup mark
+    (brand green #609926) because that instance is unbranded. Shipping either
+    would have put somebody else's identity on this product.
+
+    To use the real one, REPLACE THIS FILE. Nothing else changes: Brand.tsx
+    renders it as an <img> at a fixed height, so any SVG or transparent PNG
+    works whatever its aspect ratio.
+
+    Colours are explicit rather than `currentColor` on purpose. An <img> is an
+    isolated document and cannot inherit the page's colour, and a brand mark
+    should not change with the theme anyway. The blue matches --accent in
+    styles.css; if that changes, change this too.
+  -->
+  <path d="M16 3 6 6.8v8.4c0 6.1 4.1 11.1 10 13 5.9-1.9 10-6.9 10-13V6.8L16 3Z"/>
+  <circle cx="16" cy="14.4" r="3.4"/>
+  <path d="M16 20.6v2.6"/>
+</svg>

@@ -2,6 +2,8 @@ import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { useAuth } from "../auth";
+import Brand from "./Brand";
+import Icon, { type IconName } from "./Icon";
 
 /**
  * Navigation is filtered by capability, so an auditor does not see an
@@ -11,21 +13,23 @@ import { useAuth } from "../auth";
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
 
-  const links: { to: string; label: string; visible: boolean }[] = [
-    { to: "/devices", label: "Devices", visible: can("device_read") },
-    { to: "/employees", label: "Employees", visible: can("device_read") },
-    { to: "/enrollment", label: "Enrollment", visible: can("enrollment_token_manage") },
-    { to: "/audit", label: "Audit log", visible: can("audit_read") },
-    { to: "/users", label: "Administrators", visible: can("manage_users") },
+  const links: { to: string; label: string; icon: IconName; visible: boolean }[] = [
+    { to: "/devices", label: "Devices", icon: "devices", visible: can("device_read") },
+    { to: "/employees", label: "Employees", icon: "employees", visible: can("device_read") },
+    {
+      to: "/enrollment",
+      label: "Enrollment",
+      icon: "enrollment",
+      visible: can("enrollment_token_manage"),
+    },
+    { to: "/audit", label: "Audit log", icon: "audit", visible: can("audit_read") },
+    { to: "/users", label: "Administrators", icon: "admins", visible: can("manage_users") },
   ];
 
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>UbuntuGuard</span>
-        </div>
+        <Brand />
 
         <nav className="nav" aria-label="Main">
           {links
@@ -36,6 +40,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 to={link.to}
                 className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
               >
+                <Icon name={link.icon} size={17} />
                 {link.label}
               </NavLink>
             ))}
@@ -53,12 +58,15 @@ export default function Layout({ children }: { children: ReactNode }) {
             was compromised.
           */}
           <NavLink to="/account/password" className="nav-link">
+            <Icon name="lock" size={16} />
             Password
           </NavLink>
           <a href="/enroll" target="_blank" rel="noreferrer" className="nav-link">
-            Enroll Portal ↗
+            <Icon name="external" size={16} />
+            Enroll portal
           </a>
           <button type="button" className="ghost" onClick={() => void logout()}>
+            <Icon name="logout" size={16} />
             Sign out
           </button>
         </div>
@@ -67,8 +75,16 @@ export default function Layout({ children }: { children: ReactNode }) {
       <main className="content">{children}</main>
 
       <footer className="footer">
+        {/*
+          Updated when USB enforcement started actually working on real
+          hardware. It had said "no USB enforcement yet" since before the
+          enforcer existed, which by then understated the product -- and a
+          footer that is wrong about the thing it disclaims is worse than no
+          footer. What is still true is named instead.
+        */}
         <span>
-          Prototype. No USB enforcement yet — detection and response, not a guarantee.
+          USB storage control is enforced. Screen lock, disk encryption and firewall
+          policies are not implemented yet.
         </span>
       </footer>
     </div>

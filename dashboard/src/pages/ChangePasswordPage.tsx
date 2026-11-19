@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import ErrorBanner from "../components/ErrorBanner";
+import Brand from "../components/Brand";
 import { api } from "../api/client";
 import { useAuth } from "../auth";
 
@@ -74,10 +75,7 @@ export default function ChangePasswordPage({ forced = false }: { forced?: boolea
   return (
     <div className={forced ? "centred" : undefined}>
       <form className="card login" onSubmit={submit}>
-        <div className="brand large">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>UbuntuGuard</span>
-        </div>
+        <Brand size="large" />
 
         <h2>{forced ? "Set a new password" : "Change your password"}</h2>
 
