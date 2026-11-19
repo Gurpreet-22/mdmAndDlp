@@ -156,12 +156,20 @@ ARCH_PLATFORM_TAGS: dict[str, tuple[str, ...]] = {
 
 #: CPython versions the wheelhouse must satisfy.
 #:
-#: 3.10 is the agent's floor (Ubuntu 22.04) and 3.12 is Ubuntu 24.04. The two
-#: in between and 3.13 are included because cryptography ships one abi3 wheel
-#: that covers all of them, while PyYAML and cffi ship one wheel per version -
-#: so the cost of covering a version is small and the cost of missing the one
-#: an employee's laptop happens to have is a failed install.
-TARGET_PYTHONS: tuple[str, ...] = ("3.10", "3.11", "3.12", "3.13")
+#: 3.10 is the agent's floor (Ubuntu 22.04), 3.12 is Ubuntu 24.04 and 3.14 is
+#: Ubuntu 26.04. The ones in between are included because cryptography ships a
+#: single abi3 wheel that covers all of them, while PyYAML and cffi ship one
+#: wheel per version - so the cost of covering a version is small and the cost
+#: of missing the one a laptop happens to have is a failed install.
+#:
+#: 3.14 is here because omitting it made the package UNINSTALLABLE on a clean
+#: Ubuntu 26.04, which is not a hypothetical: `install.sh` builds the virtualenv
+#: with the host's `python3`, 26.04's `python3` is 3.14, and pip with
+#: PIP_NO_INDEX then cannot resolve PyYAML at all. The first 26.04 laptop this
+#: was tried on appeared to work only because it had an older virtualenv from a
+#: previous install that `install.sh` reused, so the new Python was never
+#: exercised.
+TARGET_PYTHONS: tuple[str, ...] = ("3.10", "3.11", "3.12", "3.13", "3.14")
 
 #: Packages fetched into the wheelhouse.
 #:
