@@ -85,6 +85,41 @@ if [ ! -f "${SOURCE_DIR}/pyproject.toml" ]; then
     exit 1
 fi
 
+# --- a virtualenv built for a different Python is not reusable -------------- #
+# install.sh reuses an existing /opt/ubuntuguard/venv rather than rebuilding
+# it, which is right: rebuilding on every upgrade would be slow and would throw
+# away a working environment for no reason.
+#
+# It is wrong when the interpreter underneath has moved. A virtualenv records
+# an absolute path to the python it was created from; after a release upgrade
+# that binary can be a different version or gone entirely, and the result is a
+# venv that either runs an interpreter the bundled wheels do not cover or does
+# not run at all. The agent then half-works in ways that look like anything but
+# a stale virtualenv -- which is exactly how it presented: the agent ran, the
+# enforcer did not, and the package looked installed.
+#
+# So the venv's own version is compared with the python3 that install.sh is
+# about to use, and a mismatch means it is removed and rebuilt. The device
+# identity in /var/lib/ubuntuguard is untouched, so this costs a rebuild and
+# never an enrollment.
+VENV_DIR="/opt/ubuntuguard/venv"
+
+if [ -x "${VENV_DIR}/bin/python" ]; then
+    venv_version="$("${VENV_DIR}/bin/python" -c \
+        'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    host_version="$(python3 -c \
+        'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+
+    if [ -z "${venv_version}" ]; then
+        echo "ubuntuguard-agent: the existing virtualenv does not run; rebuilding it"
+        rm -rf "${VENV_DIR}"
+    elif [ -n "${host_version}" ] && [ "${venv_version}" != "${host_version}" ]; then
+        echo "ubuntuguard-agent: the existing virtualenv is Python ${venv_version}" \
+             "but this system now has ${host_version}; rebuilding it"
+        rm -rf "${VENV_DIR}"
+    fi
+fi
+
 # --- install --------------------------------------------------------------- #
 # PIP_NO_INDEX and PIP_FIND_LINKS point pip at the wheels carried inside this
 # package instead of PyPI. Exported into the environment rather than passed as
@@ -127,15 +162,44 @@ bash "${SOURCE_DIR}/packaging/install.sh" \
     --no-instructions
 
 # --- configuration --------------------------------------------------------- #
-# agent.yaml is shipped as a dpkg conffile, so it is already unpacked by the
-# time this runs and install.sh will have kept it rather than overwriting it
-# with the example. Nothing to write here; the check exists so that a missing
-# config is reported now rather than as a confusing agent startup failure
-# later.
+# Installed here rather than shipped into /etc by dpkg, because as conffiles
+# these two files broke the install completely on any laptop that had used the
+# script installer first. dpkg found files in /etc it had not placed and asked
+# the operator to arbitrate:
+#
+#     Configuration file `/etc/ubuntuguard/agent.yaml'
+#      ==> File on system created by you or by a script.
+#      *** agent.yaml (Y/I/N/O/D/Z) [default=N] ?
+#
+# A graphical install has no prompt to show and a non-interactive apt run dies
+# with "end of file on stdin at conffile prompt". `dpkg --configure` then
+# fails, this script never runs, and the result is a package that claims to be
+# installed with no systemd units and no enforcer.
+#
+# These are not really configuration anyway: they are build-time facts about
+# which server this package belongs to, chosen by whoever built it. The
+# packaged version therefore wins, and anything already there that differs is
+# kept beside it as a .bak so nothing an administrator wrote is destroyed.
+install_packaged_file() {
+    source_file="$1"
+    target_file="$2"
+
+    [ -f "${source_file}" ] || return 0
+
+    if [ -f "${target_file}" ] && ! cmp -s "${source_file}" "${target_file}"; then
+        echo "ubuntuguard-agent: replacing ${target_file}, keeping the previous one as ${target_file}.bak"
+        cp -p "${target_file}" "${target_file}.bak" || true
+    fi
+    install -m 0644 -o root -g root "${source_file}" "${target_file}"
+}
+
+install -d -m 0755 -o root -g root "${CONFIG_DIR}"
+install_packaged_file "${SHARE_DIR}/server-ca.pem.dist" "${CONFIG_DIR}/server-ca.pem"
+install_packaged_file "${SHARE_DIR}/agent.yaml.dist" "${CONFIG_DIR}/agent.yaml"
+
 if [ ! -f "${CONFIG_DIR}/agent.yaml" ]; then
-    echo "ubuntuguard-agent: WARNING: ${CONFIG_DIR}/agent.yaml is missing, which" >&2
-    echo "  should not be possible for a conffile. The agent will not start until" >&2
-    echo "  it has a server URL." >&2
+    echo "ubuntuguard-agent: WARNING: ${CONFIG_DIR}/agent.yaml is missing. The" >&2
+    echo "  agent will not start until it has a server URL." >&2
 fi
 
 # Refresh the desktop and polkit caches so the enrollment application appears

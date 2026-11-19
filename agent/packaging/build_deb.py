@@ -262,10 +262,37 @@ DOC_DIR = f"usr/share/doc/{PACKAGE_NAME}"
 #: field.
 SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
-#: Files dpkg must treat as configuration: it will not overwrite local edits on
-#: upgrade, and it removes them on purge. agent.yaml holds the server URL, so
-#: it is genuinely configuration and not generated state.
-CONFFILES: tuple[str, ...] = (AGENT_YAML_PATH, SERVER_CA_PATH)
+#: Deliberately EMPTY, and this is the most important line in the file.
+#:
+#: agent.yaml and server-ca.pem were conffiles here, which looked obviously
+#: right -- they live in /etc and they name a server -- and it broke the
+#: install outright on the first laptop that had used the script installer
+#: first. dpkg found files in /etc it had not placed, and asked:
+#:
+#:     Configuration file `/etc/ubuntuguard/agent.yaml'
+#:      ==> File on system created by you or by a script.
+#:      ==> File also in package provided by package maintainer.
+#:      *** agent.yaml (Y/I/N/O/D/Z) [default=N] ?
+#:
+#: There is nobody to answer that. A graphical install has no prompt to show
+#: and a non-interactive apt run gets "end of file on stdin at conffile
+#: prompt", so `dpkg --configure` FAILS and postinst never runs: no systemd
+#: units, no enforcer, and a package that reports itself installed. That is
+#: not a corner case either, because the script installer writes exactly that
+#: file, so every laptop that used the script and then the package hits it.
+#:
+#: The deeper error was treating these as configuration at all. They are
+#: build-time facts about which server this package belongs to, decided by
+#: whoever ran build_deb.py. Asking an employee to arbitrate a conflict in
+#: them is asking the wrong person a question they cannot evaluate.
+#:
+#: They are now shipped under /usr/share and installed by postinst, which can
+#: preserve anything genuinely local without ever blocking the install.
+CONFFILES: tuple[str, ...] = ()
+
+#: Where the packaged copies live, for postinst to install from.
+AGENT_YAML_DIST_PATH = f"{SHARE_DIR}/agent.yaml.dist"
+SERVER_CA_DIST_PATH = f"{SHARE_DIR}/server-ca.pem.dist"
 
 _FIXED_MTIME = 0
 _MODE_FILE = 0o644
@@ -645,13 +672,16 @@ def assemble(
     for wheel in wheels:
         data.add_file(f"{WHEEL_SUBDIR}/{wheel.name}", wheel.read_bytes())
 
+    # Shipped under /usr/share, NOT into /etc. Nothing this package places in
+    # /etc comes from the archive, so dpkg has no conffile to ask about and
+    # the install cannot stall on a question. postinst puts them in place.
     ca_bundle = SYSTEM_CA_BUNDLE
     if server_ca_pem is not None:
         ca_bundle = f"/{SERVER_CA_PATH}"
-        data.add_file(SERVER_CA_PATH, server_ca_pem.encode("utf-8"))
+        data.add_file(SERVER_CA_DIST_PATH, server_ca_pem.encode("utf-8"))
 
     data.add_file(
-        AGENT_YAML_PATH,
+        AGENT_YAML_DIST_PATH,
         agent_yaml(
             server_url=server_url,
             ca_bundle=ca_bundle,
@@ -696,13 +726,12 @@ def assemble(
     control_tar_builder = TarBuilder()
     control_tar_builder.add_file("control", control.encode("utf-8"))
     control_tar_builder.add_file("md5sums", data.md5sums())
-    # Only the conffiles actually shipped. server-ca.pem is absent when the
-    # server uses a publicly trusted certificate, and dpkg refuses to install a
-    # package whose conffiles list names a file the archive does not contain.
-    control_tar_builder.add_file(
-        "conffiles",
-        "".join(f"/{path}\n" for path in CONFFILES if data.has(path)).encode("utf-8"),
-    )
+    # Written only if there is something to list. An empty `conffiles` is
+    # legal but pointless, and its presence invites someone to add an entry
+    # back without reading why CONFFILES is empty.
+    conffiles = [f"/{path}\n" for path in CONFFILES if data.has(path)]
+    if conffiles:
+        control_tar_builder.add_file("conffiles", "".join(conffiles).encode("utf-8"))
     for script in ("postinst", "prerm", "postrm"):
         control_tar_builder.add_file(script, read(script).encode("utf-8"), mode=_MODE_EXEC)
     control_tar = control_tar_builder.to_gzip()

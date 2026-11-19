@@ -372,8 +372,10 @@ def test_the_reminder_is_not_shipped_into_autostart_directly(
     shipped = _tar_entries(_data(artifact))
     assert builder.AUTOSTART_INSTALLED_PATH not in shipped
 
-    conffiles = _tar_file(_control(artifact), "conffiles").decode().split()
-    assert f"/{builder.AUTOSTART_INSTALLED_PATH}" not in conffiles
+    entries = _tar_entries(_control(artifact))
+    if "conffiles" in entries:
+        listed = _tar_file(_control(artifact), "conffiles").decode().split()
+        assert f"/{builder.AUTOSTART_INSTALLED_PATH}" not in listed
 
 
 def test_enrolling_stops_the_reminder(
@@ -698,32 +700,74 @@ def test_the_desktop_entry_launches_the_launcher_that_is_shipped(
     assert "Terminal=false" in desktop
 
 
-def test_conffiles_names_only_files_that_are_shipped(
+def test_the_package_ships_nothing_into_etc(
     built: tuple[bytes, dict[str, object]],
 ) -> None:
-    """dpkg refuses to install a package whose conffiles list a missing file.
+    """The regression test for the bug that broke the first real install.
 
-    server-ca.pem is absent when the server uses a publicly trusted
-    certificate, which is the configuration this fixture builds, so the list
-    must be shorter in that case rather than fixed.
+    agent.yaml and server-ca.pem used to be shipped into /etc as dpkg
+    conffiles. On any laptop that had used the script installer first -- which
+    writes exactly those paths -- dpkg found files in /etc it had not placed
+    and stopped to ask who should win:
+
+        Configuration file `/etc/ubuntuguard/agent.yaml'
+         ==> File on system created by you or by a script.
+         *** agent.yaml (Y/I/N/O/D/Z) [default=N] ?
+
+    A graphical install has no prompt to show, and a non-interactive apt run
+    dies with "end of file on stdin at conffile prompt". `dpkg --configure`
+    then fails, postinst never runs, and the package reports itself installed
+    with no systemd units and no enforcer at all.
+
+    So the archive must place nothing in /etc. postinst installs those files
+    instead, where a conflict can be resolved without asking anyone.
     """
     artifact, _ = built
-    conffiles = _tar_file(_control(artifact), "conffiles").decode().split()
     shipped = _tar_entries(_data(artifact))
-    for path in conffiles:
-        assert path.lstrip("/") in shipped, f"conffiles names {path}, which is not in the package"
+    in_etc = [name for name in shipped if name.startswith("etc/") and shipped[name].isfile()]
+    assert in_etc == [], f"these files would make dpkg prompt: {in_etc}"
 
 
-def test_the_server_ca_is_a_conffile_when_one_is_embedded(
+def test_the_package_declares_no_conffiles_at_all(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """Belt and braces on the test above: a conffiles list naming anything is
+    a route back to the interactive prompt."""
+    artifact, _ = built
+    entries = _tar_entries(_control(artifact))
+    if "conffiles" in entries:
+        listed = _tar_file(_control(artifact), "conffiles").decode().split()
+        assert listed == [], f"package declares conffiles: {listed}"
+
+
+def test_postinst_installs_the_config_and_keeps_any_previous_one(
+    built: tuple[bytes, dict[str, object]], builder: ModuleType
+) -> None:
+    """The packaged values win, because they are build-time facts about which
+    server this package belongs to, not preferences an employee can evaluate.
+
+    Anything already there that differs is kept as a .bak rather than
+    destroyed, which is the part dpkg's prompt was trying to achieve before it
+    made the install unattendable.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    assert "/etc/ubuntuguard/agent.yaml" in postinst
+    assert ".bak" in postinst
+    assert "cmp -s" in postinst, "a previous file should only be kept when it actually differs"
+
+
+def test_the_server_ca_is_shipped_for_postinst_when_one_is_embedded(
     builder: ModuleType, fake_wheels: list[Path]
 ) -> None:
     certificate = "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n"
     artifact, manifest = _build(builder, fake_wheels, server_ca_pem=certificate)
-    conffiles = _tar_file(_control(artifact), "conffiles").decode().split()
-    assert f"/{builder.SERVER_CA_PATH}" in conffiles
+    shipped = _tar_entries(_data(artifact))
+    assert builder.SERVER_CA_DIST_PATH in shipped
     assert manifest["server_ca"] == "embedded"
-    # And the agent is pointed at it rather than at the system trust store.
-    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_PATH).decode()
+    # And the agent is pointed at where postinst will put it, not at the
+    # staging copy under /usr/share.
+    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_DIST_PATH).decode()
     assert f"server_ca_bundle: /{builder.SERVER_CA_PATH}" in agent_yaml
 
 
@@ -731,9 +775,9 @@ def test_without_a_ca_the_agent_uses_the_system_trust_store(
     built: tuple[bytes, dict[str, object]], builder: ModuleType
 ) -> None:
     artifact, _ = built
-    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_PATH).decode()
+    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_DIST_PATH).decode()
     assert f"server_ca_bundle: {builder.SYSTEM_CA_BUNDLE}" in agent_yaml
-    assert not _tar_entries(_data(artifact)).get(builder.SERVER_CA_PATH)
+    assert builder.SERVER_CA_DIST_PATH not in _tar_entries(_data(artifact))
 
 
 def test_agent_yaml_has_only_the_two_permitted_keys(
@@ -742,7 +786,7 @@ def test_agent_yaml_has_only_the_two_permitted_keys(
     """The agent refuses to start with a third key, so a helpful addition here
     would be a laptop that installs and then never runs."""
     artifact, _ = built
-    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_PATH).decode()
+    agent_yaml = _tar_file(_data(artifact), builder.AGENT_YAML_DIST_PATH).decode()
     keys = [
         line.split(":", 1)[0]
         for line in agent_yaml.splitlines()
@@ -1187,6 +1231,40 @@ def test_the_wheels_are_shipped_where_postinst_looks_for_them(
     assert f"/{builder.WHEEL_SUBDIR}" in postinst
     assert "PIP_NO_INDEX" in postinst
     assert "PIP_FIND_LINKS" in postinst
+
+
+def test_postinst_rebuilds_a_virtualenv_left_over_from_another_python(
+    built: tuple[bytes, dict[str, object]],
+) -> None:
+    """install.sh reuses an existing virtualenv, which is wrong once the
+    interpreter underneath has moved.
+
+    A virtualenv records an absolute path to the python it was created from.
+    After a release upgrade that binary can be a different version or gone, and
+    what is left either runs an interpreter the bundled wheels do not cover or
+    does not run at all. On the first real laptop this presented as the agent
+    running while the enforcer did not, with the package looking installed --
+    nothing that pointed at a stale virtualenv.
+
+    postinst therefore compares the virtualenv's version with the python3
+    install.sh is about to use, and removes it on a mismatch. The device
+    identity lives in /var/lib/ubuntuguard and is untouched, so the cost is a
+    rebuild and never a re-enrollment.
+    """
+    artifact, _ = built
+    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
+    assert "/opt/ubuntuguard/venv/bin/python" in postinst
+    assert "sys.version_info" in postinst
+    # The identity directory must not be caught up in the rebuild.
+    rebuilds = [
+        line
+        for line in postinst.splitlines()
+        if line.lstrip().startswith("rm -rf") and "/opt/ubuntuguard/venv" in line
+    ]
+    assert rebuilds, "postinst never rebuilds a mismatched virtualenv"
+    assert not any("/var/lib/ubuntuguard" in line for line in rebuilds), (
+        "rebuilding the virtualenv must not touch the device identity"
+    )
 
 
 def test_postinst_installs_from_the_source_tree_that_is_shipped(
