@@ -144,22 +144,40 @@ seed_usbguard_baseline() {
         return 0
     fi
 
-    generated="$(usbguard generate-policy 2>/dev/null || true)"
-    if [ -z "${generated}" ]; then
-        # No devices enumerated, or usbguard cannot read sysfs. Writing an
-        # empty file here would be the lockout this function exists to
-        # prevent, so nothing is written and the operator is told.
-        echo "ubuntuguard-agent: WARNING: could not generate a usbguard baseline." >&2
-        echo "  usbguard blocks every device when its ruleset is empty. Before" >&2
-        echo "  starting it, run: usbguard generate-policy > ${USBGUARD_RULES}" >&2
-        return 0
-    fi
-
-    echo "ubuntuguard-agent: seeding ${USBGUARD_RULES} with the devices present now"
+    # A catch-all allow, NOT `usbguard generate-policy`.
+    #
+    # generate-policy was the first attempt and it is subtly wrong here: it
+    # enumerates the devices attached RIGHT NOW and allows those. Combined with
+    # usbguard's ImplicitPolicyTarget=block and InsertedDevicePolicy=apply-policy
+    # that blocks every device plugged in afterwards -- so a laptop that had
+    # just installed this package refused the first USB stick anyone tried,
+    # while the dashboard correctly said no policy was assigned and nothing was
+    # being enforced. The product was contradicting itself, and the package was
+    # the one enforcing.
+    #
+    # Until an administrator assigns a policy there is nothing to enforce, so
+    # the honest baseline is to allow everything. That is also what the
+    # enforcer's own derived rules do: every one of them ends in a default-allow
+    # for classes outside the protected set.
+    #
+    # Checked against usbguard-rule-parser rather than assumed to be valid
+    # syntax.
+    echo "ubuntuguard-agent: seeding ${USBGUARD_RULES} with a default-allow baseline"
     install -d -m 0755 -o root -g root /etc/usbguard
-    # 0600 root: the ruleset names every device on the machine, and usbguard
-    # refuses a world-readable one.
-    printf '%s\n' "${generated}" > "${USBGUARD_RULES}.ubuntuguard-new"
+    # 0600 root: usbguard refuses a world-readable ruleset.
+    cat > "${USBGUARD_RULES}.ubuntuguard-new" <<'RULES'
+# Installed by ubuntuguard-agent as a starting point.
+#
+# This allows every USB device. It is NOT the policy: it is the absence of one.
+# usbguard blocks everything when its ruleset is empty, so a file had to exist
+# before usbguard started or the machine would have lost its keyboard, mouse
+# and webcam to a package installation.
+#
+# The UbuntuGuard enforcer REPLACES this file the moment an administrator
+# assigns a USB policy in the dashboard. Editing it by hand is pointless once
+# that has happened.
+allow
+RULES
     chmod 0600 "${USBGUARD_RULES}.ubuntuguard-new"
     chown root:root "${USBGUARD_RULES}.ubuntuguard-new"
     mv -f "${USBGUARD_RULES}.ubuntuguard-new" "${USBGUARD_RULES}"

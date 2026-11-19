@@ -422,7 +422,7 @@ def test_postinst_seeds_a_usbguard_baseline_so_the_install_cannot_lock_usb_out(
     """
     artifact, _ = built
     postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
-    assert "usbguard generate-policy" in postinst
+    assert "/etc/usbguard/rules.conf" in postinst
     assert "/etc/usbguard/rules.conf" in postinst
 
 
@@ -466,18 +466,40 @@ def test_the_baseline_never_overwrites_an_existing_ruleset(
     assert "-s /etc/usbguard/rules.conf" in seed
 
 
-def test_an_empty_generated_policy_is_never_written(
+def test_the_baseline_allows_devices_attached_later_not_just_present_ones(
     built: tuple[bytes, dict[str, object]],
 ) -> None:
-    """Writing an empty ruleset would BE the lockout.
+    """`usbguard generate-policy` is the wrong baseline, and this is why.
 
-    If usbguard cannot enumerate anything, the safe action is to write nothing
-    and say so, not to install a file that blocks every device.
+    It enumerates the devices attached at that instant and allows those.
+    usbguard's ImplicitPolicyTarget is `block` and InsertedDevicePolicy is
+    `apply-policy`, so everything plugged in afterwards is refused. A laptop
+    that had just installed this package therefore rejected the first USB
+    stick anyone tried, while the dashboard correctly reported that no policy
+    was assigned and nothing was being enforced. The product contradicted
+    itself, and the package was the thing enforcing.
+
+    Until an administrator assigns a policy there is nothing to enforce, so
+    the baseline must allow everything -- which is what the enforcer's own
+    derived rules do too, each ending in a default-allow for classes outside
+    the protected set.
     """
     artifact, _ = built
-    postinst = _expand_shell_variables(_tar_file(_control(artifact), "postinst").decode())
-    seed = postinst.partition("seed_usbguard_baseline()")[2]
-    assert "-z ${generated}" in seed or '-z "${generated}"' in seed.replace("\\", "")
+    postinst = _tar_file(_control(artifact), "postinst").decode()
+    seed = postinst.partition("seed_usbguard_baseline()")[2].partition("\n}")[0]
+    assert seed, "postinst has no baseline function"
+
+    # Comments stripped first: the block explains at length why
+    # generate-policy is NOT used, and the explanation would match a naive
+    # search for it. The heredoc body is kept, because the rule itself lives
+    # there.
+    code = [line for line in seed.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("generate-policy" in line for line in code), (
+        "a point-in-time device list blocks everything attached later"
+    )
+    assert any(line.strip() == "allow" for line in code), (
+        "the baseline must contain an unconditional allow"
+    )
 
 
 def test_postinst_does_not_edit_another_packages_conffile(
