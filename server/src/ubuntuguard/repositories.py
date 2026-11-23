@@ -1004,6 +1004,26 @@ def get_employee_by_email(session: Session, email: str) -> Employee | None:
     return session.scalar(select(Employee).where(Employee.email == email.strip().lower()))
 
 
+def list_assigned_devices(session: Session) -> Sequence[Device]:
+    """Every device that has an owner's address recorded, revoked ones excluded.
+
+    For checking assignments against the employee directory. Revoked devices are
+    left out because they already hold no valid identity - the laptop a leaver
+    kept is only a problem while it still works, and listing the ones already
+    shut off would bury the ones that are not.
+    """
+    return list(
+        session.scalars(
+            select(Device)
+            .where(
+                Device.assigned_to_email.is_not(None),
+                Device.status != "revoked",
+            )
+            .order_by(Device.assigned_to_email, Device.hostname)
+        ).all()
+    )
+
+
 def find_employees_by_ids(session: Session, ids: Sequence[uuid.UUID]) -> Sequence[Employee]:
     """Every employee in `ids`. One statement, for annotating a page of rows."""
     wanted = set(ids)

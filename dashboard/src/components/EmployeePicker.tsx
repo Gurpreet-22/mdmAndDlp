@@ -16,6 +16,12 @@ export interface SelectedEmployee {
   name: string;
   email: string;
   department: string | null;
+  /**
+   * False when the directory thinks this person has left. Carried through to
+   * the chosen state so the warning does not disappear the moment somebody is
+   * picked, which is precisely when it matters.
+   */
+  active: boolean;
 }
 
 /** Wait this long after the last keystroke before searching. */
@@ -52,6 +58,14 @@ export default function EmployeePicker({
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   /**
+   * Show people who appear to have left. Off by default, because most of the
+   * 34 the filter hides really are gone, but reachable because the signal is a
+   * licence rather than a leave date and it does miss people.
+   */
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [counts, setCounts] = useState<{ active: number; total: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  /**
    * null = not yet known. Distinguished from false so the fallback form does
    * not flash into view during the first request.
    */
@@ -72,41 +86,65 @@ export default function EmployeePicker({
    */
   const latestQuery = useRef("");
 
-  const runSearch = useCallback(async (text: string) => {
-    latestQuery.current = text;
+  const runSearch = useCallback(async (text: string, withInactive: boolean) => {
+    // The key includes the toggle, so flipping it cannot be mistaken for a
+    // stale response to the same text and discarded.
+    const key = `${withInactive ? "all" : "active"}:${text}`;
+    latestQuery.current = key;
     setSearching(true);
     setLookupError(null);
     try {
-      const response = await api.searchDirectory(text);
-      if (latestQuery.current !== text) return;
+      const response = await api.searchDirectory(text, 25, withInactive);
+      if (latestQuery.current !== key) return;
       setConfigured(response.configured);
       setResults(response.users);
       setTruncated(response.truncated);
+      setCounts({ active: response.active_count, total: response.total_count });
       if (!response.configured) setManual(true);
     } catch (caught) {
-      if (latestQuery.current !== text) return;
+      if (latestQuery.current !== key) return;
       // Reported inline rather than thrown: a directory that is down must not
       // block issuing a token, so this offers manual entry and says why.
       setLookupError(caught instanceof Error ? caught.message : "Directory lookup failed.");
       setResults([]);
       setManual(true);
     } finally {
-      if (latestQuery.current === text) setSearching(false);
+      if (latestQuery.current === key) setSearching(false);
     }
   }, []);
+
+  /**
+   * Drop the server's cached copy and read Entra again.
+   *
+   * Offered because the two cases the cache gets wrong are routine: somebody
+   * who joined today is missing, and somebody offboarded today is still there.
+   */
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    setLookupError(null);
+    try {
+      const fresh = await api.refreshDirectory();
+      setCounts({ active: fresh.active_count, total: fresh.total_count });
+      await runSearch(query, includeInactive);
+    } catch (caught) {
+      setLookupError(caught instanceof Error ? caught.message : "Directory refresh failed.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [query, includeInactive, runSearch]);
 
   // One probe on mount, so an unconfigured directory shows the manual form
   // immediately instead of only after the admin types into a box that will
   // never return anything.
   useEffect(() => {
-    void runSearch("");
+    void runSearch("", false);
   }, [runSearch]);
 
   useEffect(() => {
     if (manual || value) return;
-    const timer = window.setTimeout(() => void runSearch(query), DEBOUNCE_MS);
+    const timer = window.setTimeout(() => void runSearch(query, includeInactive), DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query, manual, value, runSearch]);
+  }, [query, includeInactive, manual, value, runSearch]);
 
   // Close the result list on an outside click. Without this it stays open over
   // the rest of the form after the admin's attention has moved on.
@@ -127,6 +165,7 @@ export default function EmployeePicker({
       name: user.full_name,
       email: user.email,
       department: user.department,
+      active: user.active,
     });
     setOpen(false);
     setQuery("");
@@ -147,7 +186,15 @@ export default function EmployeePicker({
     // half-filled pair would mint a token that looked assigned and was not.
     onChange(
       trimmedName && trimmedEmail
-        ? { employeeId: null, name: trimmedName, email: trimmedEmail, department: null }
+        ? {
+            employeeId: null,
+            name: trimmedName,
+            email: trimmedEmail,
+            department: null,
+            // Typed in deliberately by an administrator, so there is nothing to
+            // warn about. The directory's opinion is not involved.
+            active: true,
+          }
         : null,
     );
   }
@@ -157,8 +204,8 @@ export default function EmployeePicker({
     return (
       <div>
         <span className="field-label">Issued to</span>
-        <div className="picker-chosen">
-          <Icon name="employees" size={16} />
+        <div className={value.active ? "picker-chosen" : "picker-chosen inactive"}>
+          <Icon name={value.active ? "employees" : "alert"} size={16} />
           <div className="picker-chosen-text">
             <strong>{value.name}</strong>
             <span className="muted small">{value.email}</span>
@@ -167,6 +214,13 @@ export default function EmployeePicker({
             Change
           </button>
         </div>
+        {value.active ? null : (
+          <p className="muted small">
+            <Icon name="alert" size={14} /> Entra ID has no licence assigned to this
+            address, which usually means they have left. Issuing a token anyway is
+            allowed — check first.
+          </p>
+        )}
       </div>
     );
   }
@@ -270,6 +324,14 @@ export default function EmployeePicker({
                       known
                     </span>
                   ) : null}
+                  {user.active ? null : (
+                    <span
+                      className="pill warn-pill"
+                      title="No licence assigned, which usually means they have left"
+                    >
+                      probably left
+                    </span>
+                  )}
                 </span>
                 <span className="muted small">
                   {user.email}
@@ -280,7 +342,27 @@ export default function EmployeePicker({
           ))}
           {results.length === 0 && !searching && (
             <li className="picker-empty muted small">
-              {query ? `Nobody in the directory matches "${query}".` : "No employees found."}
+              {query ? (
+                includeInactive ? (
+                  `Nobody in the directory matches "${query}".`
+                ) : (
+                  <>
+                    No current employee matches &ldquo;{query}&rdquo;.{" "}
+                    {/* Offered here, not only in the line below the box: the
+                        result list covers that line while it is open, and this
+                        is the moment the admin wants it. */}
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => setIncludeInactive(true)}
+                    >
+                      Search everyone, including people who have left
+                    </button>
+                  </>
+                )
+              ) : (
+                "No employees found."
+              )}
             </li>
           )}
           {truncated && (
@@ -291,9 +373,48 @@ export default function EmployeePicker({
         </ul>
       )}
 
-      <p className="muted small">
-        Read from Microsoft Entra ID. The device assigns itself to this person when it
-        enrols.{" "}
+      <p className="muted small picker-foot">
+        {counts ? (
+          <>
+            Showing{" "}
+            {includeInactive
+              ? `all ${counts.total} people in Microsoft Entra ID`
+              : `${counts.active} current employees`}
+            {!includeInactive && counts.total > counts.active ? (
+              <>
+                {" "}
+                · {counts.total - counts.active} hidden as probably left
+                <span
+                  className="hint-mark"
+                  title="Somebody counts as current if they hold a paid licence. This tenant leaves a leaver's account enabled and records no leave date, so a licence is the best signal available - but it is a guess, not a fact."
+                >
+                  ?
+                </span>
+              </>
+            ) : null}
+          </>
+        ) : (
+          "Read from Microsoft Entra ID."
+        )}{" "}
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => setIncludeInactive((previous) => !previous)}
+          disabled={disabled}
+        >
+          {includeInactive ? "Show current only" : "Show everyone"}
+        </button>
+        {" · "}
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => void refresh()}
+          disabled={disabled || refreshing}
+          title="Re-read Entra ID now, for somebody who joined or left today"
+        >
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        {" · "}
         <button
           type="button"
           className="link-button"
@@ -302,7 +423,7 @@ export default function EmployeePicker({
             setOpen(false);
           }}
         >
-          Not in the directory?
+          Enter by hand
         </button>
       </p>
     </div>

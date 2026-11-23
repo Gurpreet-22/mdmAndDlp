@@ -74,6 +74,8 @@ _USER_FIELDS = (
     "jobTitle",
     "accountEnabled",
     "userType",
+    # How a leaver is recognised in this tenant. See _ACTIVE_SIGNAL below.
+    "assignedLicenses",
 )
 
 #: Guests are excluded. In this tenant 24 of 117 accounts are guests on
@@ -83,6 +85,32 @@ _USER_FIELDS = (
 #: company. Disabled accounts are excluded for the same reason - a leaver
 #: should not be a valid assignee.
 _MEMBER_FILTER = "userType eq 'Member' and accountEnabled eq true"
+
+#: Why a licence means "still here", and what that costs.
+#:
+#: `accountEnabled` is the obvious signal and it is useless in this tenant:
+#: exactly one of 117 accounts is disabled, so leavers keep working accounts.
+#: `employeeLeaveDateTime` is readable and empty for all 92 members. The
+#: "All Employees" group is a static group nobody prunes, so it still lists
+#: people who left. Removing a paid licence, on the other hand, actually
+#: happens at offboarding, because it saves money.
+#:
+#: Measured against three known leavers: no licence caught two of the three,
+#: the group caught none, and `accountEnabled` caught none. So this is the best
+#: signal available here, and it is still a proxy - somebody can leave and keep
+#: a licence for a while, which is exactly the third case.
+#:
+#: Two consequences are deliberate. Unlicensed people are filtered out of the
+#: default list but not erased: `include_inactive` brings them back, so an
+#: unlicensed contractor who really is working here can still be issued a
+#: laptop. And the proxy is never presented as certainty - the API reports both
+#: counts so the dashboard can say what it is actually showing.
+#:
+#: The honest fix is `signInActivity.lastSignInDateTime`, which is evidence
+#: rather than inference. It needs the AuditLog.Read.All application permission,
+#: which this app registration does not have (Graph answers 403), and an Entra
+#: ID P1 tier. When that is granted, this is the one place to change.
+_ACTIVE_SIGNAL = "has at least one assigned licence"
 
 
 class DirectoryError(RuntimeError):
@@ -111,6 +139,20 @@ class DirectoryUser:
     email: str
     department: str | None
     job_title: str | None
+    #: Holds a paid licence, which in this tenant is what distinguishes
+    #: somebody still working here from somebody who left. See _ACTIVE_SIGNAL
+    #: for why, and for what this misses.
+    licensed: bool = False
+
+    @property
+    def active(self) -> bool:
+        """Whether this person should be offered a laptop by default.
+
+        A property rather than a second stored field, so there is one source of
+        truth and swapping the signal later means changing `_ACTIVE_SIGNAL` and
+        this line, not hunting for places that re-derived it.
+        """
+        return self.licensed
 
     def matches(self, needle: str) -> bool:
         """Substring match on name, address and department, case-insensitively.
@@ -123,6 +165,18 @@ class DirectoryUser:
             or needle in self.email.lower()
             or (self.department is not None and needle in self.department.lower())
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryCounts:
+    """How many people the directory holds, and how many are active."""
+
+    active: int
+    total: int
+
+    @property
+    def inactive(self) -> int:
+        return self.total - self.active
 
 
 @dataclass
@@ -161,22 +215,64 @@ class EntraDirectory:
     def configured(self) -> bool:
         return self._settings.entra_configured
 
-    def search(self, query: str | None = None, *, limit: int = 25) -> list[DirectoryUser]:
+    def search(
+        self,
+        query: str | None = None,
+        *,
+        limit: int = 25,
+        include_inactive: bool = False,
+    ) -> list[DirectoryUser]:
         """Employees matching `query`, or the first `limit` of them if it is empty.
+
+        Only active people by default - see `_ACTIVE_SIGNAL`. `include_inactive`
+        brings the rest back rather than making them unreachable, because the
+        signal is a proxy and somebody unlicensed may genuinely work here.
 
         Raises `DirectoryNotConfiguredError` when no credentials are set, so the
         caller can offer manual entry rather than reporting a failure.
         """
         users = self._members()
+        if not include_inactive:
+            users = tuple(user for user in users if user.active)
         needle = (query or "").strip().lower()
         if needle:
             users = tuple(user for user in users if user.matches(needle))
         return list(users[:limit])
 
+    def counts(self) -> DirectoryCounts:
+        """How many people the directory holds, and how many count as active.
+
+        Reported to the dashboard so it can state what it is showing. The
+        difference between the two numbers is the whole reason this filter
+        exists, and hiding it would turn a proxy into an unexamined claim.
+        """
+        members = self._members()
+        active = sum(1 for user in members if user.active)
+        return DirectoryCounts(active=active, total=len(members))
+
     def find_by_email(self, email: str) -> DirectoryUser | None:
-        """Exact address match, used to fill in a token's employee details."""
+        """Exact address match, used to fill in a token's employee details.
+
+        Deliberately ignores the active filter. This answers "who is this
+        address", and a caller resolving somebody already chosen should get the
+        same answer whether or not they still hold a licence.
+        """
         wanted = email.strip().lower()
         return next((user for user in self._members() if user.email == wanted), None)
+
+    def refresh(self) -> DirectoryCounts:
+        """Drop the cache and re-read the directory now.
+
+        For the two cases the cache gets wrong: somebody onboarded this morning
+        and is not in the list yet, and somebody offboarded this morning who
+        still is. Both are normal, and waiting out a ten-minute TTL is a poor
+        answer when an administrator is standing in front of a new joiner's
+        laptop.
+
+        Returns the fresh counts so the caller can report what changed.
+        """
+        self.invalidate()
+        return self.counts()
 
     def invalidate(self) -> None:
         """Drop both caches. For an explicit "refresh" action and for tests."""
@@ -355,6 +451,19 @@ class EntraDirectory:
             # just cannot be matched to an employee row, which is keyed by email.
             logger.info("skipped %d Entra account(s) with no email address", skipped_without_email)
 
+        # Nobody licensed, but people exist. Almost certainly means
+        # assignedLicenses stopped arriving - a $select typo, or a permission
+        # change - rather than a company where nobody has a licence. Worth
+        # saying out loud, because the symptom is an empty employee picker and
+        # the cause would be three layers away from it.
+        if collected and not any(user.licensed for user in collected):
+            logger.warning(
+                "all %d Entra members report no assigned licence; the employee picker will "
+                "look empty. Check that assignedLicenses is still readable - the active "
+                "filter depends on it",
+                len(collected),
+            )
+
         collected.sort(key=lambda user: user.full_name.casefold())
         return tuple(collected)
 
@@ -403,6 +512,12 @@ def _to_directory_user(entry: dict[str, object]) -> DirectoryUser | None:
         value = entry.get(key)
         return value.strip() if isinstance(value, str) and value.strip() else None
 
+    # A non-empty assignedLicenses array. Checked for being a list rather than
+    # trusted, because a $select Graph silently dropped would otherwise read as
+    # "nobody has a licence" and empty the entire picker.
+    licences = entry.get("assignedLicenses")
+    licensed = isinstance(licences, list) and len(licences) > 0
+
     return DirectoryUser(
         external_id=external_id,
         # employees.full_name and employees.email are String(120)/String(320).
@@ -412,4 +527,5 @@ def _to_directory_user(entry: dict[str, object]) -> DirectoryUser | None:
         email=email[:320],
         department=(optional("department") or None),
         job_title=(optional("jobTitle") or None),
+        licensed=licensed,
     )

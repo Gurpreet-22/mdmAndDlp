@@ -257,6 +257,11 @@ export interface DirectoryUserResponse {
   job_title: string | null;
   /** Set when this address already matches an employee record. */
   employee_id: string | null;
+  /**
+   * Whether this person still appears to work here, inferred from holding a
+   * paid licence. A proxy, not a fact: somebody can leave and keep a licence.
+   */
+  active: boolean;
 }
 
 export interface DirectorySearchResponse {
@@ -265,6 +270,41 @@ export interface DirectorySearchResponse {
   users: DirectoryUserResponse[];
   /** True when more people matched than were returned. */
   truncated: boolean;
+  /** People who appear to still work here. */
+  active_count: number;
+  /** Everybody in the directory. The gap to active_count is what the filter hides. */
+  total_count: number;
+  included_inactive: boolean;
+}
+
+export interface DirectoryRefreshResponse {
+  active_count: number;
+  total_count: number;
+}
+
+/** A working device still assigned to somebody who appears to have left. */
+export interface OffboardingFlagResponse {
+  device_id: string;
+  hostname: string | null;
+  status: string;
+  assigned_to_name: string | null;
+  assigned_to_email: string;
+  last_heartbeat_at: string | null;
+  /**
+   * no_licence: in Entra ID with no licence, which usually means offboarded.
+   * not_in_directory: not in Entra ID at all, so typed in by hand or deleted.
+   */
+  reason: "no_licence" | "not_in_directory";
+}
+
+export interface OffboardingReviewResponse {
+  configured: boolean;
+  /**
+   * Assigned, non-revoked devices examined. Reported so an empty `flagged`
+   * cannot be read as "we did not look".
+   */
+  checked: number;
+  flagged: OffboardingFlagResponse[];
 }
 
 export interface AuditEntryResponse {

@@ -815,6 +815,14 @@ class DirectoryUserResponse(BaseModel):
         default=None,
         description="Set when this address already matches an employee record.",
     )
+    active: bool = Field(
+        description=(
+            "Whether this person still appears to work here. Inferred from holding a "
+            "paid licence, because this tenant leaves a leaver's account enabled and "
+            "never fills in a leave date. A proxy, not a fact: somebody can leave and "
+            "keep a licence for a while."
+        )
+    )
 
 
 class DirectorySearchResponse(BaseModel):
@@ -835,6 +843,71 @@ class DirectorySearchResponse(BaseModel):
             "say 'keep typing' rather than implying the list is everybody."
         ),
     )
+    active_count: int = Field(
+        default=0, description="People in the directory who appear to still work here."
+    )
+    total_count: int = Field(
+        default=0,
+        description=(
+            "Everybody in the directory, active or not. Reported alongside "
+            "active_count so the dashboard can state how many people the filter is "
+            "hiding instead of presenting a filtered list as the whole company."
+        ),
+    )
+    included_inactive: bool = Field(
+        default=False, description="Whether these results include inactive people."
+    )
+
+
+class OffboardingFlagResponse(BaseModel):
+    """A working device still assigned to somebody who appears to have left.
+
+    The reason assignment is worth recording at all. A laptop whose owner has
+    gone is the case this product exists to catch, and nothing else in the
+    dashboard would surface it: the device keeps heartbeating, keeps a valid
+    certificate, and looks entirely healthy.
+    """
+
+    device_id: uuid.UUID
+    hostname: str | None
+    status: str
+    assigned_to_name: str | None
+    assigned_to_email: str
+    last_heartbeat_at: dt.datetime | None
+    reason: Literal["no_licence", "not_in_directory"] = Field(
+        description=(
+            "no_licence: the address is in Entra ID with no licence assigned, which "
+            "usually means they were offboarded. not_in_directory: the address is not "
+            "in Entra ID at all, so it was either typed in by hand or the account has "
+            "been deleted."
+        )
+    )
+
+
+class OffboardingReviewResponse(BaseModel):
+    """Assignments checked against the directory.
+
+    `checked` is reported so an empty `flagged` list cannot be mistaken for "we
+    did not look". Those are very different answers and the dashboard says
+    which one it got.
+    """
+
+    configured: bool = Field(description="False when no Entra credentials are set.")
+    checked: int = Field(default=0, description="Assigned, non-revoked devices examined.")
+    flagged: list[OffboardingFlagResponse] = Field(default_factory=list)
+
+
+class DirectoryRefreshResponse(BaseModel):
+    """Result of re-reading the directory on demand.
+
+    Exists because the cache is wrong for exactly two cases that matter: a
+    joiner who started this morning and is not in the list, and a leaver who
+    still is. Waiting out a TTL is a poor answer when an administrator is
+    holding the new person's laptop.
+    """
+
+    active_count: int
+    total_count: int
 
 
 class AssignDeviceRequest(StrictModel):

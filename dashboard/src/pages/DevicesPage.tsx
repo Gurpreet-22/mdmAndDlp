@@ -4,7 +4,11 @@ import { Link } from "react-router-dom";
 import AddDeviceDialog from "../components/AddDeviceDialog";
 import ErrorBanner from "../components/ErrorBanner";
 import { api } from "../api/client";
-import type { DeviceCounts, DeviceSummary } from "../api/client";
+import type {
+  DeviceCounts,
+  DeviceSummary,
+  OffboardingFlagResponse,
+} from "../api/client";
 import { useAuth } from "../auth";
 
 /** Relative time, with the absolute value always shown alongside it. */
@@ -57,6 +61,14 @@ export default function DevicesPage() {
   const [adding, setAdding] = useState(false);
   const [checkingOffline, setCheckingOffline] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
+  /**
+   * Devices still assigned to somebody the directory says has left.
+   *
+   * Loaded separately from the device list rather than folded into it: the
+   * check calls Microsoft Graph, so a directory that is slow or down would
+   * otherwise delay or break the page that every other task starts from.
+   */
+  const [offboarding, setOffboarding] = useState<OffboardingFlagResponse[]>([]);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -91,6 +103,23 @@ export default function DevicesPage() {
     const handle = setTimeout(() => void load(), 250);
     return () => clearTimeout(handle);
   }, [load]);
+
+  // Once on mount, and deliberately not tied to the filters: the warning is
+  // about the whole fleet, so narrowing the table should not change it.
+  // Failures are swallowed on purpose - an unreachable directory is reported by
+  // the enrollment form, and a red banner here would blame the wrong page.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .offboardingReview()
+      .then((review) => {
+        if (!cancelled) setOffboarding(review.flagged);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleCheckOffline() {
     setCheckingOffline(true);
@@ -147,6 +176,42 @@ export default function DevicesPage() {
       {offlineNotice && (
         <div className="banner ok" role="status" style={{ marginBottom: "1rem" }}>
           <p>{offlineNotice}</p>
+        </div>
+      )}
+
+      {offboarding.length > 0 && (
+        <div className="banner warn" role="status" style={{ marginBottom: "1rem" }}>
+          <div className="banner-head">
+            <strong>
+              {offboarding.length === 1
+                ? "A working laptop is assigned to someone who may have left"
+                : `${offboarding.length} working laptops are assigned to people who may have left`}
+            </strong>
+          </div>
+          <p>
+            These devices still hold a valid certificate and keep checking in, so nothing
+            else on this page would mention them. Worth confirming before they stay out
+            there.
+          </p>
+          <ul className="plain-list">
+            {offboarding.map((flag) => (
+              <li key={flag.device_id}>
+                <Link to={`/devices/${flag.device_id}`}>
+                  {flag.hostname ?? flag.device_id.slice(0, 8)}
+                </Link>{" "}
+                — {flag.assigned_to_name ?? flag.assigned_to_email}{" "}
+                <span className="muted small">
+                  {flag.reason === "no_licence"
+                    ? "(no Microsoft licence assigned)"
+                    : "(not in Microsoft Entra ID)"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">
+            Based on whether the owner holds a paid licence, which is a guess rather than a
+            leave date. Someone entered by hand, like a contractor, will show here too.
+          </p>
         </div>
       )}
 

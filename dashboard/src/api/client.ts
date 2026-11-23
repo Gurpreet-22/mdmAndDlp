@@ -14,11 +14,13 @@ import type {
   DeviceSummary,
   DeviceUsbPolicyView,
   DebPackageInfoResponse,
+  DirectoryRefreshResponse,
   DirectorySearchResponse,
   Employee,
   EnrollmentTokenResponse,
   InstallerInfoResponse,
   MeResponse,
+  OffboardingReviewResponse,
   PolicyDetail,
   PolicySummary,
   Problem,
@@ -72,6 +74,7 @@ export type {
   DebPackageInfoResponse,
   DevicePlatform,
   DeviceSummary,
+  DirectoryRefreshResponse,
   DirectorySearchResponse,
   DirectoryUserResponse,
   Employee,
@@ -79,6 +82,8 @@ export type {
   FieldError,
   InstallerInfoResponse,
   MeResponse,
+  OffboardingFlagResponse,
+  OffboardingReviewResponse,
   Problem,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
@@ -440,13 +445,36 @@ export const api = {
   /**
    * Search the Microsoft Entra ID directory.
    *
+   * Only people who appear to still work here, unless `includeInactive`.
    * Returns `configured: false` rather than failing when no Entra credentials
    * are set, which the caller should treat as "offer manual entry".
    */
-  searchDirectory: (query: string, limit = 25) =>
+  searchDirectory: (query: string, limit = 25, includeInactive = false) =>
     request<DirectorySearchResponse>("/api/v1/employees/directory", {
-      query: { q: query || undefined, limit },
+      query: {
+        q: query || undefined,
+        limit,
+        // Omitted when false so the common request has a stable URL and the
+        // browser's own cache is not split in two by a redundant parameter.
+        include_inactive: includeInactive ? true : undefined,
+      },
     }),
+
+  /**
+   * Re-read the directory now instead of waiting for the server's cache to
+   * expire. For a joiner who started this morning, or a leaver who did.
+   */
+  refreshDirectory: () =>
+    request<DirectoryRefreshResponse>("/api/v1/employees/directory:refresh", {
+      method: "POST",
+    }),
+
+  /**
+   * Working devices still assigned to somebody the directory says has left.
+   * Read-only: it reports, it does not revoke or unassign.
+   */
+  offboardingReview: () =>
+    request<OffboardingReviewResponse>("/api/v1/employees/offboarding-review"),
 
   revokeEnrollmentToken: (tokenId: string) =>
     request<void>(`/api/v1/enrollment-tokens/${encodeURIComponent(tokenId)}:revoke`, {
