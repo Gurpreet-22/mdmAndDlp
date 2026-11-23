@@ -175,9 +175,8 @@ export default function EnrollmentTokensPage() {
         </div>
         {!employee && (
           <p className="muted small">
-            Without an employee the laptop enrols unassigned, which is right for a spare or
-            shared machine. Otherwise pick somebody: the device then assigns itself and the
-            Assignment card is filled in before anyone looks at it.
+            Leave the employee blank for a spare or shared machine — the laptop will enrol
+            unassigned.
           </p>
         )}
       </div>

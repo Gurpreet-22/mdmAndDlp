@@ -52,9 +52,15 @@ _PAGE_SIZE = 999
 _MAX_PAGES = 20
 
 #: Re-fetch the member list this often. Long enough that typing in the picker
-#: does not hammer Graph, short enough that a new joiner appears the same
-#: morning. Joiners are rare; a stale entry is recoverable by manual entry.
+#: does not hammer Graph, short enough that a leaver stops being offered the
+#: same morning.
 _USER_CACHE_TTL = dt.timedelta(minutes=10)
+
+#: How stale the cached list must be before a search that found nobody is
+#: allowed to re-read the directory. Short, because the case it serves is a
+#: joiner who is not in the list yet and the administrator is waiting; but not
+#: zero, or every keystroke of a misspelled name would be a Graph call.
+_AUTO_REFRESH_MIN_AGE = dt.timedelta(seconds=30)
 
 #: Treat an access token as expired this long before it really is, so a token
 #: that is valid when we check cannot expire in flight.
@@ -167,18 +173,6 @@ class DirectoryUser:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class DirectoryCounts:
-    """How many people the directory holds, and how many are active."""
-
-    active: int
-    total: int
-
-    @property
-    def inactive(self) -> int:
-        return self.total - self.active
-
-
 @dataclass
 class _CachedToken:
     value: str
@@ -228,27 +222,49 @@ class EntraDirectory:
         brings the rest back rather than making them unreachable, because the
         signal is a proxy and somebody unlicensed may genuinely work here.
 
+        A search that matches nobody re-reads the directory once and tries
+        again. That is exactly the new-joiner case: somebody started this
+        morning, the cached list predates them, and the administrator holding
+        their laptop should not have to know a cache exists. Rate-limited by
+        `_AUTO_REFRESH_MIN_AGE`, so typing a name that genuinely is not there
+        cannot turn every keystroke into a Graph call.
+
         Raises `DirectoryNotConfiguredError` when no credentials are set, so the
         caller can offer manual entry rather than reporting a failure.
         """
+        matched = self._matching(query, include_inactive=include_inactive)
+
+        if (
+            not matched
+            and (query or "").strip()
+            and self._cache_is_older_than(_AUTO_REFRESH_MIN_AGE)
+        ):
+            self.invalidate()
+            matched = self._matching(query, include_inactive=include_inactive)
+
+        return list(matched[:limit])
+
+    def _matching(self, query: str | None, *, include_inactive: bool) -> tuple[DirectoryUser, ...]:
         users = self._members()
         if not include_inactive:
             users = tuple(user for user in users if user.active)
         needle = (query or "").strip().lower()
         if needle:
             users = tuple(user for user in users if user.matches(needle))
-        return list(users[:limit])
+        return users
 
-    def counts(self) -> DirectoryCounts:
-        """How many people the directory holds, and how many count as active.
+    def _cache_is_older_than(self, age: dt.timedelta) -> bool:
+        """Whether a re-read could plausibly return something new.
 
-        Reported to the dashboard so it can state what it is showing. The
-        difference between the two numbers is the whole reason this filter
-        exists, and hiding it would turn a proxy into an unexamined claim.
+        Guards the auto-refresh above. Without it, an administrator typing a
+        misspelled name would miss on every keystroke and each miss would hit
+        Graph, which is both slow and a good way to get rate-limited.
         """
-        members = self._members()
-        active = sum(1 for user in members if user.active)
-        return DirectoryCounts(active=active, total=len(members))
+        with self._lock:
+            cached = self._users
+        if cached is None:
+            return False
+        return dt.datetime.now(dt.UTC) - cached.fetched_at > age
 
     def find_by_email(self, email: str) -> DirectoryUser | None:
         """Exact address match, used to fill in a token's employee details.
@@ -259,20 +275,6 @@ class EntraDirectory:
         """
         wanted = email.strip().lower()
         return next((user for user in self._members() if user.email == wanted), None)
-
-    def refresh(self) -> DirectoryCounts:
-        """Drop the cache and re-read the directory now.
-
-        For the two cases the cache gets wrong: somebody onboarded this morning
-        and is not in the list yet, and somebody offboarded this morning who
-        still is. Both are normal, and waiting out a ten-minute TTL is a poor
-        answer when an administrator is standing in front of a new joiner's
-        laptop.
-
-        Returns the fresh counts so the caller can report what changed.
-        """
-        self.invalidate()
-        return self.counts()
 
     def invalidate(self) -> None:
         """Drop both caches. For an explicit "refresh" action and for tests."""

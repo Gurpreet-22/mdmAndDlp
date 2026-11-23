@@ -58,13 +58,11 @@ export default function EmployeePicker({
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   /**
-   * Show people who appear to have left. Off by default, because most of the
-   * 34 the filter hides really are gone, but reachable because the signal is a
-   * licence rather than a leave date and it does miss people.
+   * Show people who appear to have left. Off by default, and turned on only
+   * from the empty result row - the one moment it is wanted - rather than
+   * sitting on the form as a permanent control.
    */
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [counts, setCounts] = useState<{ active: number; total: number } | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   /**
    * null = not yet known. Distinguished from false so the fallback form does
    * not flash into view during the first request.
@@ -99,7 +97,6 @@ export default function EmployeePicker({
       setConfigured(response.configured);
       setResults(response.users);
       setTruncated(response.truncated);
-      setCounts({ active: response.active_count, total: response.total_count });
       if (!response.configured) setManual(true);
     } catch (caught) {
       if (latestQuery.current !== key) return;
@@ -112,26 +109,6 @@ export default function EmployeePicker({
       if (latestQuery.current === key) setSearching(false);
     }
   }, []);
-
-  /**
-   * Drop the server's cached copy and read Entra again.
-   *
-   * Offered because the two cases the cache gets wrong are routine: somebody
-   * who joined today is missing, and somebody offboarded today is still there.
-   */
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    setLookupError(null);
-    try {
-      const fresh = await api.refreshDirectory();
-      setCounts({ active: fresh.active_count, total: fresh.total_count });
-      await runSearch(query, includeInactive);
-    } catch (caught) {
-      setLookupError(caught instanceof Error ? caught.message : "Directory refresh failed.");
-    } finally {
-      setRefreshing(false);
-    }
-  }, [query, includeInactive, runSearch]);
 
   // One probe on mount, so an unconfigured directory shows the manual form
   // immediately instead of only after the admin types into a box that will
@@ -256,34 +233,31 @@ export default function EmployeePicker({
             }}
           />
         </div>
-        <p className="muted small">
-          {lookupError ? (
-            <>
-              <Icon name="alert" size={14} /> {lookupError} Enter the employee by hand for
-              now.
-            </>
-          ) : configured === false ? (
-            "Microsoft Entra ID is not configured, so employees are entered by hand. Set the Entra credentials on the server to search the company directory instead."
-          ) : (
-            "Matched against existing employees by email, so entering somebody twice will not create a duplicate record."
-          )}
-          {configured ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => {
-                  setManual(false);
-                  setLookupError(null);
-                  clear();
-                }}
-              >
-                Search the directory instead
-              </button>
-            </>
-          ) : null}
-        </p>
+        {/* Only says something when there is something worth saying. A
+            directory that is down needs explaining, because the admin asked
+            for a search and got two text boxes. An unconfigured one needs
+            nothing: typing a name is simply how this deployment works. */}
+        {lookupError ? (
+          <p className="muted small">
+            <Icon name="alert" size={14} /> {lookupError} Enter the employee by hand for
+            now.
+          </p>
+        ) : null}
+        {configured ? (
+          <p className="muted small">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                setManual(false);
+                setLookupError(null);
+                clear();
+              }}
+            >
+              Search the directory instead
+            </button>
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -341,25 +315,36 @@ export default function EmployeePicker({
             </li>
           ))}
           {results.length === 0 && !searching && (
+            /* The only place the fallbacks are offered. Putting them on the
+               form as permanent links made the enrollment page explain the
+               directory's internals to somebody who just wants to pick a
+               name; here they appear at the one moment they are useful. */
             <li className="picker-empty muted small">
               {query ? (
-                includeInactive ? (
-                  `Nobody in the directory matches "${query}".`
-                ) : (
-                  <>
-                    No current employee matches &ldquo;{query}&rdquo;.{" "}
-                    {/* Offered here, not only in the line below the box: the
-                        result list covers that line while it is open, and this
-                        is the moment the admin wants it. */}
+                <>
+                  No {includeInactive ? "" : "current "}employee matches &ldquo;{query}
+                  &rdquo;.{" "}
+                  {!includeInactive && (
                     <button
                       type="button"
                       className="link-button"
                       onClick={() => setIncludeInactive(true)}
                     >
-                      Search everyone, including people who have left
+                      Include people who have left
                     </button>
-                  </>
-                )
+                  )}
+                  {!includeInactive && " · "}
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => {
+                      setManual(true);
+                      setOpen(false);
+                    }}
+                  >
+                    Enter manually
+                  </button>
+                </>
               ) : (
                 "No employees found."
               )}
@@ -373,59 +358,6 @@ export default function EmployeePicker({
         </ul>
       )}
 
-      <p className="muted small picker-foot">
-        {counts ? (
-          <>
-            Showing{" "}
-            {includeInactive
-              ? `all ${counts.total} people in Microsoft Entra ID`
-              : `${counts.active} current employees`}
-            {!includeInactive && counts.total > counts.active ? (
-              <>
-                {" "}
-                · {counts.total - counts.active} hidden as probably left
-                <span
-                  className="hint-mark"
-                  title="Somebody counts as current if they hold a paid licence. This tenant leaves a leaver's account enabled and records no leave date, so a licence is the best signal available - but it is a guess, not a fact."
-                >
-                  ?
-                </span>
-              </>
-            ) : null}
-          </>
-        ) : (
-          "Read from Microsoft Entra ID."
-        )}{" "}
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => setIncludeInactive((previous) => !previous)}
-          disabled={disabled}
-        >
-          {includeInactive ? "Show current only" : "Show everyone"}
-        </button>
-        {" · "}
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => void refresh()}
-          disabled={disabled || refreshing}
-          title="Re-read Entra ID now, for somebody who joined or left today"
-        >
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-        {" · "}
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => {
-            setManual(true);
-            setOpen(false);
-          }}
-        >
-          Enter by hand
-        </button>
-      </p>
     </div>
   );
 }

@@ -22,7 +22,6 @@ from ubuntuguard.api.deps import (
 )
 from ubuntuguard.models import Employee
 from ubuntuguard.schemas import (
-    DirectoryRefreshResponse,
     DirectorySearchResponse,
     DirectoryUserResponse,
     EmployeeCreateRequest,
@@ -147,9 +146,8 @@ def search_directory(
     Only people who appear to still work here are returned by default. In this
     tenant that means holding a paid licence, which is the one offboarding step
     that actually happens - see `_ACTIVE_SIGNAL` in services/directory.py for
-    the measurements and the limits. The counts in the response say how many
-    people are being hidden, and `include_inactive` brings them back, because a
-    proxy this imperfect must not be the only way to find somebody.
+    the measurements and the limits. `include_inactive` brings the rest back,
+    because a proxy this imperfect must not be the only way to find somebody.
 
     Returns 200 with `configured: false` when no Entra credentials are set,
     rather than an error. That is a supported deployment, and the dashboard
@@ -162,7 +160,6 @@ def search_directory(
         # One more than asked for, purely to detect truncation. The extra is
         # dropped below, so the caller still gets exactly `limit`.
         found = directory.search(q, limit=limit + 1, include_inactive=include_inactive)
-        counts = directory.counts()
     except DirectoryNotConfiguredError:
         return DirectorySearchResponse(configured=False, users=[])
     except DirectoryError as exc:
@@ -192,9 +189,6 @@ def search_directory(
     return DirectorySearchResponse(
         configured=True,
         truncated=truncated,
-        active_count=counts.active,
-        total_count=counts.total,
-        included_inactive=include_inactive,
         users=[
             DirectoryUserResponse(
                 external_id=user.external_id,
@@ -289,50 +283,6 @@ def offboarding_review(
     return OffboardingReviewResponse(configured=True, checked=len(devices), flagged=flagged)
 
 
-@router.post("/directory:refresh", response_model=DirectoryRefreshResponse)
-def refresh_directory(
-    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
-    directory: EntraDirectory = Depends(get_directory),
-) -> DirectoryRefreshResponse:
-    """Re-read the directory now, rather than waiting for the cache to expire.
-
-    The cached list is wrong in exactly two situations, and both are routine:
-    somebody started this morning and is not in it, and somebody was offboarded
-    this morning and still is. An administrator standing in front of a new
-    joiner's laptop should not have to wait out a ten-minute timer.
-
-    A POST, not a GET: it has a side effect on server state, and a GET that
-    discards a cache would be re-run by any well-behaved proxy or prefetch.
-
-    Not audited. Reading a directory changes nothing about devices, policies or
-    identities, and an entry per keystroke-adjacent refresh would bury the
-    entries that matter.
-    """
-    if not directory.configured:
-        raise problems.ProblemError(
-            "directory_not_configured",
-            status=409,
-            title="No employee directory is configured",
-            detail=(
-                "Set UBUNTUGUARD_ENTRA_TENANT_ID, UBUNTUGUARD_ENTRA_CLIENT_ID and "
-                "UBUNTUGUARD_ENTRA_CLIENT_SECRET to enable directory lookup. Employees "
-                "can still be entered by hand without it."
-            ),
-        )
-
-    try:
-        counts = directory.refresh()
-    except DirectoryError as exc:
-        raise problems.ProblemError(
-            "directory_unavailable",
-            status=502,
-            title="Could not read the employee directory",
-            detail=str(exc),
-        ) from exc
-
-    return DirectoryRefreshResponse(active_count=counts.active, total_count=counts.total)
-
-
 @router.get("/{employee_id}", response_model=EmployeeResponse)
 def get_employee(
     employee_id: uuid.UUID,
@@ -418,4 +368,3 @@ def delete_employee(
     )
     repositories.delete_employee(session, emp)
     session.commit()
-

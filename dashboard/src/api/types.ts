@@ -270,16 +270,6 @@ export interface DirectorySearchResponse {
   users: DirectoryUserResponse[];
   /** True when more people matched than were returned. */
   truncated: boolean;
-  /** People who appear to still work here. */
-  active_count: number;
-  /** Everybody in the directory. The gap to active_count is what the filter hides. */
-  total_count: number;
-  included_inactive: boolean;
-}
-
-export interface DirectoryRefreshResponse {
-  active_count: number;
-  total_count: number;
 }
 
 /** A working device still assigned to somebody who appears to have left. */

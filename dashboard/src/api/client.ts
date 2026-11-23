@@ -14,7 +14,6 @@ import type {
   DeviceSummary,
   DeviceUsbPolicyView,
   DebPackageInfoResponse,
-  DirectoryRefreshResponse,
   DirectorySearchResponse,
   Employee,
   EnrollmentTokenResponse,
@@ -74,7 +73,6 @@ export type {
   DebPackageInfoResponse,
   DevicePlatform,
   DeviceSummary,
-  DirectoryRefreshResponse,
   DirectorySearchResponse,
   DirectoryUserResponse,
   Employee,
@@ -458,15 +456,6 @@ export const api = {
         // browser's own cache is not split in two by a redundant parameter.
         include_inactive: includeInactive ? true : undefined,
       },
-    }),
-
-  /**
-   * Re-read the directory now instead of waiting for the server's cache to
-   * expire. For a joiner who started this morning, or a leaver who did.
-   */
-  refreshDirectory: () =>
-    request<DirectoryRefreshResponse>("/api/v1/employees/directory:refresh", {
-      method: "POST",
     }),
 
   /**

@@ -1126,39 +1126,6 @@ td .pill + .pill {
   color: var(--warn);
 }
 
-/* The line under the search box: what is being shown, and the controls that
-   change it. Wraps rather than overflowing on a narrow window. */
-.picker-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem;
-  max-width: 32rem;
-}
-
-/* A hoverable "?" for an explanation too long to sit in the sentence. Carries
-   its own text in a title attribute, so it works without JavaScript and is
-   reachable by keyboard focus. */
-.hint-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  margin-left: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--muted);
-  cursor: help;
-}
-
-.hint-mark:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* A list inside a banner. No bullets or indent, because the banner already
    frames it and a nested disc reads as a second level of structure. */
 .plain-list {

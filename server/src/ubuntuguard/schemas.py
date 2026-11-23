@@ -843,20 +843,6 @@ class DirectorySearchResponse(BaseModel):
             "say 'keep typing' rather than implying the list is everybody."
         ),
     )
-    active_count: int = Field(
-        default=0, description="People in the directory who appear to still work here."
-    )
-    total_count: int = Field(
-        default=0,
-        description=(
-            "Everybody in the directory, active or not. Reported alongside "
-            "active_count so the dashboard can state how many people the filter is "
-            "hiding instead of presenting a filtered list as the whole company."
-        ),
-    )
-    included_inactive: bool = Field(
-        default=False, description="Whether these results include inactive people."
-    )
 
 
 class OffboardingFlagResponse(BaseModel):
@@ -895,19 +881,6 @@ class OffboardingReviewResponse(BaseModel):
     configured: bool = Field(description="False when no Entra credentials are set.")
     checked: int = Field(default=0, description="Assigned, non-revoked devices examined.")
     flagged: list[OffboardingFlagResponse] = Field(default_factory=list)
-
-
-class DirectoryRefreshResponse(BaseModel):
-    """Result of re-reading the directory on demand.
-
-    Exists because the cache is wrong for exactly two cases that matter: a
-    joiner who started this morning and is not in the list, and a leaver who
-    still is. Waiting out a TTL is a poor answer when an administrator is
-    holding the new person's laptop.
-    """
-
-    active_count: int
-    total_count: int
 
 
 class AssignDeviceRequest(StrictModel):
