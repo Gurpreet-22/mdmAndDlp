@@ -1146,3 +1146,69 @@ td .pill + .pill {
 .plain-list li + li {
   margin-top: 0.3rem;
 }
+
+/* ------------------------------------------------- dialogs and forms --- */
+
+/* These four class names were in use on the Employees page with no rules
+   behind them, which is why its dialog rendered inline underneath the table
+   and its search box collapsed to nothing. */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3rem 1rem;
+  overflow-y: auto;
+  background: rgba(17, 24, 32, 0.45);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 32rem;
+  /* The card already supplies surface, border and padding. */
+  margin: 0;
+}
+
+.dialog h2 {
+  margin-top: 0;
+}
+
+/* Stacked label above control, which is what the markup assumes. */
+.form-group {
+  margin-bottom: 0.85rem;
+}
+
+.form-group > label {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+/* `input, select` is width:100% globally, so inside a flex row the selects
+   claimed the whole width and squeezed the search field to a sliver. Giving
+   the selects a basis and letting the search take the remainder fixes it. */
+.filter-bar > input[type="search"] {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+}
+
+.filter-bar > select {
+  flex: 0 1 12rem;
+  width: auto;
+}
+
+@media (max-width: 640px) {
+  .filter-bar > input[type="search"],
+  .filter-bar > select {
+    flex: 1 1 100%;
+  }
+}

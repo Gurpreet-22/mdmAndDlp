@@ -44,10 +44,19 @@ export default function EmployeePicker({
   value,
   onChange,
   disabled = false,
+  label = "Issue to employee",
+  chosenLabel = "Issued to",
 }: {
   value: SelectedEmployee | null;
   onChange: (next: SelectedEmployee | null) => void;
   disabled?: boolean;
+  /**
+   * Wording for the two states. The default suits issuing a token; the
+   * Employees page is creating a record rather than issuing anything, and
+   * "Issued to" there would describe something that is not happening.
+   */
+  label?: string;
+  chosenLabel?: string;
 }) {
   const inputId = useId();
   const listId = useId();
@@ -180,7 +189,7 @@ export default function EmployeePicker({
   if (value) {
     return (
       <div>
-        <span className="field-label">Issued to</span>
+        <span className="field-label">{chosenLabel}</span>
         <div className={value.active ? "picker-chosen" : "picker-chosen inactive"}>
           <Icon name={value.active ? "employees" : "alert"} size={16} />
           <div className="picker-chosen-text">
@@ -265,7 +274,7 @@ export default function EmployeePicker({
   // --- Directory search -------------------------------------------------- //
   return (
     <div ref={boxRef} className="picker">
-      <label htmlFor={inputId}>Issue to employee</label>
+      <label htmlFor={inputId}>{label}</label>
       <div className="picker-input">
         <Icon name="search" size={16} />
         <input

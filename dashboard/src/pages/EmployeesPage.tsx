@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import EmployeePicker from "../components/EmployeePicker";
+import type { SelectedEmployee } from "../components/EmployeePicker";
 import ErrorBanner from "../components/ErrorBanner";
 import { api } from "../api/client";
 import type { CreateEmployeeRequest, Employee, UpdateEmployeeRequest } from "../api/client";
@@ -16,8 +18,8 @@ export default function EmployeesPage() {
 
   // Add Dialog
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [addName, setAddName] = useState("");
-  const [addEmail, setAddEmail] = useState("");
+  /** Chosen from Entra ID, not typed. Null until somebody is picked. */
+  const [addEmployee, setAddEmployee] = useState<SelectedEmployee | null>(null);
   const [addDept, setAddDept] = useState("");
   const [addTitle, setAddTitle] = useState("");
   const [addPhone, setAddPhone] = useState("");
@@ -56,20 +58,25 @@ export default function EmployeesPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!addEmployee) return;
     setAddBusy(true);
     setError(null);
     try {
       const body: CreateEmployeeRequest = {
-        full_name: addName.trim(),
-        email: addEmail.trim(),
-        department: addDept.trim() || null,
+        // Name and address come from the directory rather than the keyboard,
+        // so one person cannot become two records differing by a capital
+        // letter or a missing surname.
+        full_name: addEmployee.name,
+        email: addEmployee.email,
+        // The three Entra does not hold for this tenant. Department is empty on
+        // all 92 accounts, so if it is wanted it has to be typed here.
+        department: addDept.trim() || addEmployee.department || null,
         job_title: addTitle.trim() || null,
         phone: addPhone.trim() || null,
       };
       await api.createEmployee(body);
       setIsAddOpen(false);
-      setAddName("");
-      setAddEmail("");
+      setAddEmployee(null);
       setAddDept("");
       setAddTitle("");
       setAddPhone("");
@@ -139,7 +146,9 @@ export default function EmployeesPage() {
         <div>
           <h1>Employees</h1>
           <p className="muted">
-            Directory of company employees, department associations, and device assignments.
+            People who hold, or have held, a company laptop. Not the full staff list —
+            that lives in Microsoft Entra ID and is read directly when you issue a
+            token. A record appears here once somebody is issued one.
           </p>
         </div>
         {can("enrollment_token_manage") && (
@@ -194,7 +203,14 @@ export default function EmployeesPage() {
       {/* Employees Table */}
       <div className="card">
         {employees.length === 0 ? (
-          <p className="muted">No employee records found.</p>
+          /* Says why it is empty rather than just that it is. An empty list
+             here reads as "the directory failed to load" unless it explains
+             that records are created by issuing a token, not by syncing. */
+          <p className="muted">
+            Nobody has been issued a laptop yet. Records appear here when you create an
+            enrollment token for someone on the{" "}
+            <Link to="/enrollment">Enrollment</Link> page.
+          </p>
         ) : (
           <table className="data-table">
             <thead>
@@ -269,31 +285,33 @@ export default function EmployeesPage() {
       {isAddOpen && (
         <div className="dialog-overlay">
           <div className="dialog card">
-            <h2>Add Employee Record</h2>
+            <h2>Add an employee record</h2>
             <form onSubmit={handleCreate}>
+              {/* The picker, not two text boxes. Typing a name and address by
+                  hand for somebody already in Entra ID is how you get two
+                  records for one person. The remaining fields stay free text
+                  because Entra holds none of them for this tenant. */}
               <div className="form-group">
-                <label htmlFor="add-name">Full Name *</label>
-                <input
-                  id="add-name"
-                  type="text"
-                  required
-                  value={addName}
-                  onChange={(e) => setAddName(e.target.value)}
-                  placeholder="e.g. Sarah Connor"
+                <EmployeePicker
+                  value={addEmployee}
+                  onChange={(next) => {
+                    setAddEmployee(next);
+                    // Prefill from the directory where it has anything, but
+                    // leave what the admin typed alone.
+                    if (next?.department && !addDept) setAddDept(next.department);
+                  }}
+                  disabled={addBusy}
+                  label="Who is this record for?"
+                  chosenLabel="Employee"
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="add-email">Work Email *</label>
-                <input
-                  id="add-email"
-                  type="email"
-                  required
-                  value={addEmail}
-                  onChange={(e) => setAddEmail(e.target.value)}
-                  placeholder="sarah@company.com"
-                />
-              </div>
+              {addEmployee?.employeeId && (
+                <p className="banner warn" role="status">
+                  {addEmployee.name} already has a record here. Close this and edit it
+                  instead — adding again will be refused.
+                </p>
+              )}
 
               <div className="form-group">
                 <label htmlFor="add-dept">Department</label>
@@ -340,7 +358,9 @@ export default function EmployeesPage() {
                 <button
                   type="submit"
                   className="button primary"
-                  disabled={addBusy}
+                  // Nothing to save until somebody is chosen, and saving a
+                  // person who already has a record would only earn a 409.
+                  disabled={addBusy || !addEmployee || Boolean(addEmployee.employeeId)}
                 >
                   {addBusy ? "Saving…" : "Save Employee"}
                 </button>
