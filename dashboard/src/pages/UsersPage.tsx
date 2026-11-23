@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "../components/ErrorBanner";
 import UserActionsDialog from "../components/UserActionsDialog";
 import type { UserAction } from "../components/UserActionsDialog";
 import { api } from "../api/client";
 import type { AdminRole, UserResponse } from "../api/client";
+import { copyText } from "../clipboard";
+import type { CopyOutcome } from "../clipboard";
 import { useAuth } from "../auth";
 
 /**
@@ -60,7 +62,9 @@ export default function UsersPage() {
 
   /** Held in component state only, so it disappears on navigation. */
   const [justCreated, setJustCreated] = useState<{ email: string; password: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyOutcome | null>(null);
+  /** The credential element, selected as a fallback when the clipboard is barred. */
+  const secretRef = useRef<HTMLElement | null>(null);
 
   const [search, setSearch] = useState("");
 
@@ -94,7 +98,7 @@ export default function UsersPage() {
   async function create() {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopied(null);
     try {
       const created = await api.createUser(email.trim(), password, role);
       // Shown once, so the administrator can pass it on. The server stored only
@@ -180,19 +184,19 @@ export default function UsersPage() {
             lost, disable the account and create another.
           </p>
           <div className="token-row">
-            <code className="token">
+            <code className="token" ref={secretRef}>
               {justCreated.email} · {justCreated.password}
             </code>
             <button
               type="button"
               className="ghost"
               onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(justCreated.password)
-                  .then(() => setCopied(true));
+                void copyText(justCreated.password, secretRef.current).then(
+                  setCopied,
+                );
               }}
             >
-              {copied ? "Copied" : "Copy password"}
+              {copied === "copied" ? "Copied" : "Copy password"}
             </button>
             <button type="button" className="ghost" onClick={() => setJustCreated(null)}>
               Dismiss

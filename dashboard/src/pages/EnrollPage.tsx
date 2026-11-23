@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
+import { copyText } from "../clipboard";
 import Brand from "../components/Brand";
 import type { DebPackageInfoResponse, InstallerInfoResponse } from "../api/client";
 
@@ -109,7 +110,11 @@ export default function EnrollPage() {
   }, []);
 
   function copy(label: string, value: string) {
-    void navigator.clipboard?.writeText(value).then(() => {
+    // This page is reached by an employee over plain HTTP, where
+    // `navigator.clipboard` does not exist, so the old call silently did
+    // nothing. `copyText` falls back to execCommand.
+    void copyText(value).then((outcome) => {
+      if (outcome !== "copied") return;
       setCopied(label);
       window.setTimeout(() => setCopied(null), 2000);
     });

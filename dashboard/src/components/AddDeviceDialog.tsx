@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import ErrorBanner from "./ErrorBanner";
 import Modal from "./Modal";
 import { api } from "../api/client";
+import { copyText } from "../clipboard";
+import type { CopyOutcome } from "../clipboard";
 import type { DevicePlatform, RegisterDeviceResponse } from "../api/client";
 
 const TTL_CHOICES = [
@@ -67,7 +69,8 @@ export default function AddDeviceDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [result, setResult] = useState<RegisterDeviceResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyOutcome | null>(null);
+  const tokenRef = useRef<HTMLElement | null>(null);
 
   function reset() {
     setPlatform("linux");
@@ -81,7 +84,7 @@ export default function AddDeviceDialog({
     setTtl(86400);
     setError(null);
     setResult(null);
-    setCopied(false);
+    setCopied(null);
   }
 
   function close() {
@@ -149,15 +152,19 @@ export default function AddDeviceDialog({
               use, bound to this device, and expires on its own.
             </p>
             <div className="token-row">
-              <code className="token">{token}</code>
+              <code className="token" ref={tokenRef}>
+                {token}
+              </code>
               <button
                 type="button"
                 className="ghost"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(token).then(() => setCopied(true));
+                  void copyText(token, tokenRef.current).then((outcome) =>
+                    setCopied(outcome),
+                  );
                 }}
               >
-                {copied ? "Copied" : "Copy"}
+                {copied === "copied" ? "Copied" : "Copy"}
               </button>
             </div>
             {result.enrollment_token_expires_at && (

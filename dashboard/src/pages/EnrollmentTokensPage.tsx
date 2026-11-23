@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import EmployeePicker from "../components/EmployeePicker";
 import type { SelectedEmployee } from "../components/EmployeePicker";
 import ErrorBanner from "../components/ErrorBanner";
 import { api } from "../api/client";
+import { copyText } from "../clipboard";
+import type { CopyOutcome } from "../clipboard";
 import type { CreateEnrollmentTokenResponse, EnrollmentTokenResponse } from "../api/client";
 
 const TTL_CHOICES = [
@@ -21,7 +23,9 @@ export default function EnrollmentTokensPage() {
   const [busy, setBusy] = useState(false);
   /** Held only in component state. Gone on navigation, which is intended. */
   const [justCreated, setJustCreated] = useState<CreateEnrollmentTokenResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyOutcome | null>(null);
+  /** The token element, so it can be selected when the clipboard is unavailable. */
+  const tokenRef = useRef<HTMLElement | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -39,7 +43,7 @@ export default function EnrollmentTokensPage() {
   async function create() {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopied(null);
     try {
       setJustCreated(
         await api.createEnrollmentToken({
@@ -107,22 +111,40 @@ export default function EnrollmentTokensPage() {
             it is lost, revoke it and issue another.
           </p>
           <div className="token-row">
-            <code className="token">{justCreated.enrollment_token}</code>
+            <code className="token" ref={tokenRef}>
+              {justCreated.enrollment_token}
+            </code>
             <button
               type="button"
               className="ghost"
               onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(justCreated.enrollment_token)
-                  .then(() => setCopied(true));
+                void copyText(justCreated.enrollment_token, tokenRef.current).then(
+                  setCopied,
+                );
               }}
             >
-              {copied ? "Copied" : "Copy"}
+              {copied === "copied" ? "Copied" : "Copy"}
             </button>
             <button type="button" className="ghost" onClick={() => setJustCreated(null)}>
               Dismiss
             </button>
           </div>
+          {/* Only when the clipboard could not be written. Saying nothing here
+              is what made the broken button so costly: the token is shown
+              once, so an admin who thought they had copied it had to revoke
+              and re-issue. */}
+          {copied === "selected" && (
+            <p className="muted small">
+              Your browser blocks clipboard access on an insecure page, so the token is
+              selected instead — press Ctrl+C.
+            </p>
+          )}
+          {copied === "failed" && (
+            <p className="muted small">
+              Copying is not available on this page. Select the token above and copy it
+              by hand.
+            </p>
+          )}
           <p className="muted small">
             {justCreated.employee ? (
               <>
