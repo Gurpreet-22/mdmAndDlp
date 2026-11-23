@@ -213,6 +213,18 @@ export interface DeviceDetail extends DeviceSummary {
   disk_free_bytes: number | null;
 }
 
+/**
+ * Who a token was issued for. Read from the employee record when the response
+ * is built, so a corrected name shows up here rather than being frozen onto
+ * the token at the moment it was minted.
+ */
+export interface TokenEmployeeSummary {
+  id: string;
+  full_name: string;
+  email: string;
+  department: string | null;
+}
+
 export interface EnrollmentTokenResponse {
   id: string;
   label: string | null;
@@ -222,6 +234,8 @@ export interface EnrollmentTokenResponse {
   revoked_at: string | null;
   consumed_by_device_id: string | null;
   status: "active" | "consumed" | "expired" | "revoked";
+  /** Null for a token minted without an employee; that device enrols unassigned. */
+  employee: TokenEmployeeSummary | null;
 }
 
 export interface CreateEnrollmentTokenResponse {
@@ -230,6 +244,27 @@ export interface CreateEnrollmentTokenResponse {
   enrollment_token: string;
   expires_at: string;
   label: string | null;
+  employee: TokenEmployeeSummary | null;
+}
+
+/** One person from Microsoft Entra ID, as offered in the employee picker. */
+export interface DirectoryUserResponse {
+  /** The Entra object id. Stable across renames. */
+  external_id: string;
+  full_name: string;
+  email: string;
+  department: string | null;
+  job_title: string | null;
+  /** Set when this address already matches an employee record. */
+  employee_id: string | null;
+}
+
+export interface DirectorySearchResponse {
+  /** False when no Entra credentials are set; the form falls back to manual entry. */
+  configured: boolean;
+  users: DirectoryUserResponse[];
+  /** True when more people matched than were returned. */
+  truncated: boolean;
 }
 
 export interface AuditEntryResponse {

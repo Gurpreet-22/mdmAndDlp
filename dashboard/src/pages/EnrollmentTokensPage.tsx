@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import EmployeePicker from "../components/EmployeePicker";
+import type { SelectedEmployee } from "../components/EmployeePicker";
 import ErrorBanner from "../components/ErrorBanner";
 import { api } from "../api/client";
 import type { CreateEnrollmentTokenResponse, EnrollmentTokenResponse } from "../api/client";
@@ -13,6 +15,7 @@ const TTL_CHOICES = [
 export default function EnrollmentTokensPage() {
   const [tokens, setTokens] = useState<EnrollmentTokenResponse[]>([]);
   const [error, setError] = useState<unknown>(null);
+  const [employee, setEmployee] = useState<SelectedEmployee | null>(null);
   const [label, setLabel] = useState("");
   const [ttl, setTtl] = useState(86400);
   const [busy, setBusy] = useState(false);
@@ -38,8 +41,19 @@ export default function EnrollmentTokensPage() {
     setError(null);
     setCopied(false);
     try {
-      setJustCreated(await api.createEnrollmentToken(label, ttl));
+      setJustCreated(
+        await api.createEnrollmentToken({
+          label,
+          ttlSeconds: ttl,
+          employeeId: employee?.employeeId ?? null,
+          // Sent only when there is no id: the server refuses both at once.
+          employeeName: employee && !employee.employeeId ? employee.name : null,
+          employeeEmail: employee && !employee.employeeId ? employee.email : null,
+          department: employee?.department ?? null,
+        }),
+      );
       setLabel("");
+      setEmployee(null);
       await load();
     } catch (caught) {
       setError(caught);
@@ -109,19 +123,35 @@ export default function EnrollmentTokensPage() {
               Dismiss
             </button>
           </div>
-          <p className="muted small">Expires {justCreated.expires_at}</p>
+          <p className="muted small">
+            {justCreated.employee ? (
+              <>
+                For {justCreated.employee.full_name} ({justCreated.employee.email}). The
+                laptop assigns itself to them on enrollment. Expires{" "}
+                {justCreated.expires_at}
+              </>
+            ) : (
+              <>
+                No employee attached, so the laptop enrols unassigned. Expires{" "}
+                {justCreated.expires_at}
+              </>
+            )}
+          </p>
         </div>
       )}
 
       <div className="card">
         <h2>Create a token</h2>
-        <div className="inline-form">
+
+        <EmployeePicker value={employee} onChange={setEmployee} disabled={busy} />
+
+        <div className="inline-form" style={{ marginTop: "1rem" }}>
           <div>
-            <label htmlFor="label">Label (optional)</label>
+            <label htmlFor="label">Note (optional)</label>
             <input
               id="label"
               value={label}
-              placeholder="e.g. finance laptop 014"
+              placeholder="e.g. loaner from the Delhi shelf"
               onChange={(event) => setLabel(event.target.value)}
             />
           </div>
@@ -143,6 +173,13 @@ export default function EnrollmentTokensPage() {
             {busy ? "Creating…" : "Create token"}
           </button>
         </div>
+        {!employee && (
+          <p className="muted small">
+            Without an employee the laptop enrols unassigned, which is right for a spare or
+            shared machine. Otherwise pick somebody: the device then assigns itself and the
+            Assignment card is filled in before anyone looks at it.
+          </p>
+        )}
       </div>
 
       <div className="card table-card">
@@ -150,7 +187,8 @@ export default function EnrollmentTokensPage() {
         <table>
           <thead>
             <tr>
-              <th>Label</th>
+              <th>Issued to</th>
+              <th>Note</th>
               <th>Status</th>
               <th>Created</th>
               <th>Expires</th>
@@ -161,7 +199,17 @@ export default function EnrollmentTokensPage() {
           <tbody>
             {tokens.map((token) => (
               <tr key={token.id}>
-                <td>{token.label ?? <span className="muted">no label</span>}</td>
+                <td>
+                  {token.employee ? (
+                    <>
+                      <div>{token.employee.full_name}</div>
+                      <div className="muted small">{token.employee.email}</div>
+                    </>
+                  ) : (
+                    <span className="muted">unassigned</span>
+                  )}
+                </td>
+                <td>{token.label ?? <span className="muted">—</span>}</td>
                 <td>
                   <span className={`pill ${token.status}`}>{token.status}</span>
                 </td>
@@ -191,7 +239,7 @@ export default function EnrollmentTokensPage() {
             ))}
             {tokens.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted centred-cell">
+                <td colSpan={7} className="muted centred-cell">
                   No tokens yet.
                 </td>
               </tr>

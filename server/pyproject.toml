@@ -37,13 +37,19 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "argon2-cffi>=23.1",
     "cryptography>=43",
+    # Runtime, not just tests: the Entra ID directory lookup in
+    # services/directory.py calls Microsoft Graph over HTTPS. Chosen over
+    # `requests` because it is already the test client, so there is one HTTP
+    # library in the tree rather than two. Chosen over `msal` because this needs
+    # one form POST against one well-documented endpoint, and msal brings a
+    # token cache and a plugin system we would not use.
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2",
     "pytest-cov>=5.0",
-    "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
 ]

@@ -423,6 +423,7 @@ def create_enrollment_token(
     expires_at: dt.datetime,
     label: str | None,
     pre_registered_device_id: uuid.UUID | None = None,
+    employee_id: uuid.UUID | None = None,
 ) -> EnrollmentToken:
     row = EnrollmentToken(
         token_hash=token_hash,
@@ -430,6 +431,7 @@ def create_enrollment_token(
         expires_at=expires_at,
         label=label,
         pre_registered_device_id=pre_registered_device_id,
+        employee_id=employee_id,
     )
     session.add(row)
     session.flush()
@@ -1000,6 +1002,29 @@ def get_employee(session: Session, employee_id: uuid.UUID) -> Employee | None:
 
 def get_employee_by_email(session: Session, email: str) -> Employee | None:
     return session.scalar(select(Employee).where(Employee.email == email.strip().lower()))
+
+
+def find_employees_by_ids(session: Session, ids: Sequence[uuid.UUID]) -> Sequence[Employee]:
+    """Every employee in `ids`. One statement, for annotating a page of rows."""
+    wanted = set(ids)
+    if not wanted:
+        return []
+    return list(session.scalars(select(Employee).where(Employee.id.in_(wanted))).all())
+
+
+def find_employees_by_emails(session: Session, emails: Sequence[str]) -> Sequence[Employee]:
+    """Every employee whose address is in `emails`.
+
+    One statement instead of a lookup per address, because the directory picker
+    needs to annotate a whole page of results with "already an employee" and
+    doing that row by row is 25 round trips for one screen.
+    """
+    wanted = {email.strip().lower() for email in emails if email and email.strip()}
+    if not wanted:
+        # IN () is a syntax error in some dialects and an always-false in
+        # others. Not asking is unambiguous.
+        return []
+    return list(session.scalars(select(Employee).where(Employee.email.in_(wanted))).all())
 
 
 def list_employees(

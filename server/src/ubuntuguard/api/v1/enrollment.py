@@ -17,13 +17,14 @@ from sqlalchemy.orm import Session
 from ubuntuguard import problems, repositories
 from ubuntuguard.api.deps import Principal, get_keys, get_session, require_capability
 from ubuntuguard.constants import PAGE_SIZE
-from ubuntuguard.models import EnrollmentToken
+from ubuntuguard.models import Employee, EnrollmentToken
 from ubuntuguard.schemas import (
     CreateEnrollmentTokenRequest,
     CreateEnrollmentTokenResponse,
     EnrollmentTokenResponse,
     EnrollRequest,
     EnrollResponse,
+    TokenEmployeeSummary,
 )
 from ubuntuguard.security.rbac import Capability
 from ubuntuguard.security.tokens import generate_enrollment_token
@@ -52,12 +53,19 @@ def create_token(
     session: Session = Depends(get_session),
     principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
 ) -> CreateEnrollmentTokenResponse:
-    """Mint a one-time enrollment token.
+    """Mint a one-time enrollment token, optionally for a named employee.
 
     The plaintext is returned exactly once and is never stored. If it is lost,
     issue another one; there is no recovery path, by design.
+
+    Naming an employee is what makes the device arrive assigned. The admin
+    issuing the token knows whose laptop it is; recording it here means nobody
+    has to remember a second form afterwards, which is why assignment used to
+    be empty on devices that were otherwise working fine.
     """
     now = dt.datetime.now(dt.UTC)
+    employee = _resolve_employee(session, body, principal, request)
+
     token = generate_enrollment_token()
     expires_at = now + dt.timedelta(seconds=body.ttl_seconds)
 
@@ -67,6 +75,7 @@ def create_token(
         created_by=uuid.UUID(principal.user_id),
         expires_at=expires_at,
         label=body.label,
+        employee_id=employee.id if employee is not None else None,
     )
     audit.append(
         session,
@@ -78,7 +87,15 @@ def create_token(
         request_id=getattr(request.state, "request_id", None),
         # The hash is not recorded either: the audit log is widely readable, and
         # a hash plus a captured plaintext would confirm which token was which.
-        detail={"label": body.label, "expires_at": expires_at, "ttl_seconds": body.ttl_seconds},
+        detail={
+            "label": body.label,
+            "expires_at": expires_at,
+            "ttl_seconds": body.ttl_seconds,
+            # Who it was for belongs in the trail: this is the record of which
+            # administrator authorised which person to enrol a device.
+            "employee_id": str(employee.id) if employee is not None else None,
+            "employee_email": employee.email if employee is not None else None,
+        },
     )
     session.commit()
     return CreateEnrollmentTokenResponse(
@@ -86,7 +103,87 @@ def create_token(
         enrollment_token=token.plaintext,
         expires_at=expires_at,
         label=row.label,
+        employee=_employee_summary(employee),
     )
+
+
+def _employee_summary(employee: Employee | None) -> TokenEmployeeSummary | None:
+    if employee is None:
+        return None
+    return TokenEmployeeSummary(
+        id=employee.id,
+        full_name=employee.full_name,
+        email=employee.email,
+        department=employee.department,
+    )
+
+
+def _resolve_employee(
+    session: Session,
+    body: CreateEnrollmentTokenRequest,
+    principal: Principal,
+    request: Request,
+) -> Employee | None:
+    """Turn whatever the request said about the employee into a row, or None.
+
+    Three inputs, by design (see `CreateEnrollmentTokenRequest`): an id for
+    somebody already known, a name and address which is matched by address
+    before creating anything, or nothing at all for a spare machine.
+
+    Matching on address before creating is the part that matters. Without it,
+    minting a second token for the same person would silently produce a second
+    employee row, and their two laptops would appear to belong to two different
+    people.
+    """
+    if body.employee_id is not None:
+        employee = repositories.get_employee(session, body.employee_id)
+        if employee is None:
+            # 404 rather than creating one: an id that resolves to nothing means
+            # the caller is working from a stale list, and inventing a nameless
+            # employee to satisfy the request would hide that.
+            raise problems.not_found("employee")
+        return employee
+
+    if body.employee_email is None or body.employee_name is None:
+        # The request validator already refuses one without the other, so this
+        # is unreachable via HTTP. Checked rather than asserted because `assert`
+        # is stripped under `python -O`, which would turn a future direct caller
+        # passing a half-filled request into an employee row with no name.
+        return None
+
+    existing = repositories.get_employee_by_email(session, body.employee_email)
+    if existing is not None:
+        # Deliberately does not overwrite the stored name from the request. The
+        # employee record is the system of record; a token request is not the
+        # place to rename somebody, and a directory display name that differs by
+        # punctuation should not rewrite a name an admin corrected by hand.
+        return existing
+
+    employee = repositories.create_employee(
+        session,
+        full_name=body.employee_name,
+        email=body.employee_email,
+        department=body.department,
+    )
+    audit.append(
+        session,
+        action="employee_created",
+        actor_id=principal.user_id,
+        actor_role=principal.role.value,
+        target_type="employee",
+        target_id=str(employee.id),
+        request_id=getattr(request.state, "request_id", None),
+        detail={
+            "full_name": employee.full_name,
+            "email": employee.email,
+            "department": employee.department,
+            # Distinguishes this from a record created on the Employees page,
+            # so the trail shows the row appeared as a side effect of issuing a
+            # token rather than by a deliberate "add employee" action.
+            "created_via": "enrollment_token",
+        },
+    )
+    return employee
 
 
 @admin_router.get("", response_model=list[EnrollmentTokenResponse])
@@ -97,6 +194,17 @@ def list_tokens(
 ) -> list[EnrollmentTokenResponse]:
     """Metadata only. Neither the token nor its hash is ever returned."""
     now = dt.datetime.now(dt.UTC)
+    rows = list(repositories.list_enrollment_tokens(session, limit=limit))
+
+    # Employees fetched in one query for the whole page rather than per row, so
+    # listing 50 tokens is two statements instead of fifty-one.
+    employees = {
+        employee.id: employee
+        for employee in repositories.find_employees_by_ids(
+            session, [row.employee_id for row in rows if row.employee_id is not None]
+        )
+    }
+
     return [
         EnrollmentTokenResponse(
             id=row.id,
@@ -107,8 +215,11 @@ def list_tokens(
             revoked_at=row.revoked_at,
             consumed_by_device_id=row.consumed_by_device_id,
             status=_status(row, now),  # type: ignore[arg-type]
+            employee=_employee_summary(
+                employees.get(row.employee_id) if row.employee_id is not None else None
+            ),
         )
-        for row in repositories.list_enrollment_tokens(session, limit=limit)
+        for row in rows
     ]
 
 

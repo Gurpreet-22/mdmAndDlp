@@ -27,6 +27,7 @@ from ubuntuguard.security.device_auth import (
     extract_client_certificate,
 )
 from ubuntuguard.security.rbac import Capability, Role, can
+from ubuntuguard.services.directory import EntraDirectory
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +196,19 @@ def get_settings(request: Request) -> Settings:
     """
     settings: Settings = request.app.state.settings
     return settings
+
+
+def get_directory(request: Request) -> EntraDirectory:
+    """The shared Entra ID directory reader.
+
+    Same reasoning as `get_settings`: `create_app` always sets it, and the
+    instance is shared so its token and member caches are worth having. Whether
+    credentials are actually configured is the route's business, not this
+    dependency's - an unconfigured directory is a normal state that the
+    dashboard handles by offering manual entry.
+    """
+    directory: EntraDirectory = request.app.state.directory
+    return directory
 
 
 def _bearer_token(request: Request) -> str:

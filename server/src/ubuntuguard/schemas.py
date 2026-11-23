@@ -16,7 +16,14 @@ import ipaddress
 import uuid
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from ubuntuguard.constants import (
     ENROLLMENT_TOKEN_DEFAULT_TTL_SECONDS,
@@ -219,8 +226,42 @@ class AuthModeResponse(BaseModel):
 
 
 class CreateEnrollmentTokenRequest(StrictModel):
+    """Mint a token, optionally for a named employee.
+
+    The employee is the point of this form. An administrator issuing a token
+    knows whose laptop it is, and recording it here means the device assigns
+    itself on enrollment instead of arriving unowned and waiting for somebody
+    to remember a second form.
+
+    Three ways to say who it is for, in order of preference:
+
+    - `employee_id`, for somebody already on the Employees page.
+    - `employee_name` plus `employee_email`, which finds an existing employee
+      by email or creates one. This is what the dashboard sends, because
+      typing a name is faster than hunting a list and the admin should not
+      have to create the employee first.
+    - nothing at all, for a spare or shared machine that belongs to no one
+      yet. The device then enrols unassigned, exactly as before.
+
+    `label` survives as a genuinely optional note -- "loaner from the Delhi
+    shelf" -- rather than the only place to record anything, which is what it
+    had become.
+    """
+
+    employee_id: uuid.UUID | None = Field(
+        default=None, description="An existing employee. Mutually exclusive with employee_email."
+    )
+    employee_name: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = Field(
+        default=None, description="Full name, when creating or matching by email."
+    )
+    employee_email: AdminEmail | None = Field(
+        default=None, description="Matched against existing employees before creating one."
+    )
+    department: Annotated[str, StringConstraints(max_length=120)] | None = Field(
+        default=None, description="Only used when a new employee is created."
+    )
     label: ShortText | None = Field(
-        default=None, description="Operator note, e.g. the laptop this is for."
+        default=None, description="Optional note, e.g. 'loaner laptop'. Not the employee."
     )
     ttl_seconds: int = Field(
         default=ENROLLMENT_TOKEN_DEFAULT_TTL_SECONDS,
@@ -228,6 +269,38 @@ class CreateEnrollmentTokenRequest(StrictModel):
         le=ENROLLMENT_TOKEN_DEFAULT_TTL_SECONDS,
         description="Lifetime, capped at 24 hours.",
     )
+
+    @model_validator(mode="after")
+    def _one_way_of_naming_the_employee(self) -> CreateEnrollmentTokenRequest:
+        if self.employee_id is not None and (self.employee_email or self.employee_name):
+            raise ValueError(
+                "give either employee_id or employee_name/employee_email, not both: "
+                "two different answers to 'who is this for' cannot be reconciled here"
+            )
+        # A name with no email cannot be matched or created: email is the
+        # natural key on employees. Refused rather than silently dropped, which
+        # would mint a token that looked assigned and was not.
+        if self.employee_name and not self.employee_email:
+            raise ValueError("employee_email is required when employee_name is given")
+        if self.employee_email and not self.employee_name:
+            raise ValueError("employee_name is required when employee_email is given")
+        return self
+
+
+class TokenEmployeeSummary(BaseModel):
+    """Who a token was issued for, denormalised for display.
+
+    Carries the name and address alongside the id so the tokens list renders in
+    one request. The id is what any further action should use; these two
+    strings are a label, and they are read from the employee record at response
+    time rather than copied onto the token, so a corrected spelling shows up
+    here too.
+    """
+
+    id: uuid.UUID
+    full_name: str
+    email: str
+    department: str | None = None
 
 
 class CreateEnrollmentTokenResponse(BaseModel):
@@ -240,6 +313,13 @@ class CreateEnrollmentTokenResponse(BaseModel):
     )
     expires_at: dt.datetime
     label: str | None
+    employee: TokenEmployeeSummary | None = Field(
+        default=None,
+        description=(
+            "The employee this token will assign the device to on enrollment. "
+            "Null for a token minted without one, which enrols unassigned."
+        ),
+    )
 
 
 class InstallerInfoResponse(BaseModel):
@@ -351,6 +431,10 @@ class EnrollmentTokenResponse(BaseModel):
     revoked_at: dt.datetime | None
     consumed_by_device_id: uuid.UUID | None
     status: Literal["active", "consumed", "expired", "revoked"]
+    employee: TokenEmployeeSummary | None = Field(
+        default=None,
+        description="Who the token was issued for, if anyone.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -711,6 +795,46 @@ class EmployeeResponse(BaseModel):
     assigned_device_count: int = 0
     created_at: dt.datetime
     updated_at: dt.datetime
+
+
+class DirectoryUserResponse(BaseModel):
+    """One person from Microsoft Entra ID, as offered in a picker.
+
+    `employee_id` is the bridge back to our own table. When it is set, this
+    person already has an `employees` row and the dashboard should send that id
+    rather than a name and address, which keeps one person from becoming two
+    rows because a display name changed in the directory.
+    """
+
+    external_id: str = Field(description="The Entra object id. Stable across renames.")
+    full_name: str
+    email: str
+    department: str | None
+    job_title: str | None
+    employee_id: uuid.UUID | None = Field(
+        default=None,
+        description="Set when this address already matches an employee record.",
+    )
+
+
+class DirectorySearchResponse(BaseModel):
+    """Directory results, plus enough state for the dashboard to explain itself.
+
+    `configured` is here so an unconfigured tenant is not reported as an error.
+    No Entra credentials is a normal, supported deployment: the dashboard reads
+    this flag and offers a plain name-and-email form instead of a picker, and
+    nothing about enrollment stops working.
+    """
+
+    configured: bool = Field(description="False when no Entra credentials are set.")
+    users: list[DirectoryUserResponse] = Field(default_factory=list)
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when more people matched than were returned, so the dashboard can "
+            "say 'keep typing' rather than implying the list is everybody."
+        ),
+    )
 
 
 class AssignDeviceRequest(StrictModel):

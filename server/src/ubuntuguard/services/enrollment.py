@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from ubuntuguard import problems, repositories
 from ubuntuguard.constants import ENROLLMENT_IDEMPOTENCY_SECONDS
+from ubuntuguard.models import Device, Employee, EnrollmentToken
 from ubuntuguard.schemas import EnrollRequest, EnrollResponse
 from ubuntuguard.security.tokens import fingerprint_public_key, hash_token
 from ubuntuguard.services import audit
@@ -44,6 +45,60 @@ from ubuntuguard.services.ca import (
     verify_csr,
 )
 from ubuntuguard.services.keys import KeyBundle
+
+
+def _assign_from_token(
+    session: Session,
+    *,
+    token: EnrollmentToken | None,
+    device: Device,
+) -> Employee | None:
+    """Assign the freshly enrolled device to the employee the token named.
+
+    Returns the employee, or None when there was nothing to do. Every reason
+    for doing nothing is a legitimate state rather than a failure:
+
+    - the token named nobody, which is how a spare or shared machine enrols;
+    - the employee record has since been deleted, leaving `employee_id` NULL
+      via ON DELETE SET NULL, or deleted between minting and enrolling;
+    - the device already has an owner, because "Add device" pre-registered it
+      and an administrator assigned it there. That assignment is the more
+      recent deliberate act, and `assign_device` would close it and open
+      another, rewriting history to say the same thing.
+
+    Deliberately does not raise. A failure to assign must not fail the
+    enrollment: the device has a certificate by this point, and a 500 here
+    would leave a laptop holding a valid identity the server had rolled back.
+    """
+    if token is None or token.employee_id is None:
+        return None
+
+    employee = repositories.get_employee(session, token.employee_id)
+    if employee is None:
+        return None
+
+    # Any existing statement of ownership counts, including a free-text name
+    # with no employee record behind it. "Add device" lets an admin type a name
+    # without linking it, and that is still a deliberate answer to "whose is
+    # this" which the token should not silently replace.
+    if device.assigned_to_id is not None or device.assigned_to_name is not None:
+        return None
+
+    repositories.assign_device(
+        session,
+        device=device,
+        assigned_to_name=employee.full_name,
+        assigned_to_email=employee.email,
+        department=employee.department,
+        employee_id=employee.id,
+        # The administrator who minted the token. There is no authenticated
+        # principal on this request - the device is the caller - so attributing
+        # the assignment to whoever authorised it is both accurate and the only
+        # actor available.
+        assigned_by=token.created_by,
+        notes="Assigned automatically from the enrollment token.",
+    )
+    return employee
 
 
 def enroll(
@@ -225,6 +280,15 @@ def enroll(
     )
     repositories.attach_token_to_device(session, token_id=token_id, device_id=device.id)
 
+    # --- 6. Assign the device, if the token said who it was for ------------ #
+    # The administrator recorded the owner when they minted the token, so the
+    # device can arrive assigned instead of waiting for somebody to fill in a
+    # second form. Skipped when the device already has an assignment, which
+    # happens when "Add device" pre-registered it and an admin assigned it
+    # there: that is a more deliberate statement than the token's, and
+    # overwriting it would silently close an assignment an admin had made.
+    assigned_employee = _assign_from_token(session, token=token, device=device)
+
     response = EnrollResponse(
         device_id=device.id,
         client_certificate_pem=certificate_pem,
@@ -270,6 +334,12 @@ def enroll(
             # had registered.
             "claimed_pre_registration": pre_registered is not None
             and device.id == pre_registered.id,
+            # Who it landed with, or null if the token named nobody. Reading
+            # this back answers "why is this laptop unassigned" without
+            # guessing.
+            "assigned_to_employee_id": (
+                str(assigned_employee.id) if assigned_employee is not None else None
+            ),
         },
     )
     audit.append(

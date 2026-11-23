@@ -13,15 +13,28 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from ubuntuguard import problems
-from ubuntuguard.api.deps import Principal, get_principal, get_session, require_capability
+from ubuntuguard.api.deps import (
+    Principal,
+    get_directory,
+    get_principal,
+    get_session,
+    require_capability,
+)
 from ubuntuguard.models import Employee
 from ubuntuguard.schemas import (
+    DirectorySearchResponse,
+    DirectoryUserResponse,
     EmployeeCreateRequest,
     EmployeeResponse,
     EmployeeUpdateRequest,
 )
 from ubuntuguard.security.rbac import Capability
 from ubuntuguard.services import audit
+from ubuntuguard.services.directory import (
+    DirectoryError,
+    DirectoryNotConfiguredError,
+    EntraDirectory,
+)
 from ubuntuguard import repositories
 
 router = APIRouter(prefix="/employees", tags=["employees"])
@@ -92,6 +105,79 @@ def create_employee(
     )
     session.commit()
     return _employee_response(employee, 0)
+
+
+#: Declared BEFORE /{employee_id} on purpose. FastAPI matches routes in
+#: declaration order, so with the parameterised route first, a request for
+#: /employees/directory would try to parse "directory" as a UUID and answer 422.
+@router.get("/directory", response_model=DirectorySearchResponse)
+def search_directory(
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+    directory: EntraDirectory = Depends(get_directory),
+    q: Annotated[str | None, Query(description="Search by name, email, or department")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> DirectorySearchResponse:
+    """Look up employees in Microsoft Entra ID.
+
+    Read-only, and it writes nothing: a directory entry becomes an `employees`
+    row only when a device is actually assigned. Gated on
+    ENROLLMENT_TOKEN_MANAGE rather than DEVICE_READ because this exposes the
+    company's whole staff list, which is more than a read-only device viewer
+    needs.
+
+    Returns 200 with `configured: false` when no Entra credentials are set,
+    rather than an error. That is a supported deployment, and the dashboard
+    falls back to typing a name and address by hand.
+    """
+    if not directory.configured:
+        return DirectorySearchResponse(configured=False, users=[])
+
+    try:
+        # One more than asked for, purely to detect truncation. The extra is
+        # dropped below, so the caller still gets exactly `limit`.
+        found = directory.search(q, limit=limit + 1)
+    except DirectoryNotConfiguredError:
+        return DirectorySearchResponse(configured=False, users=[])
+    except DirectoryError as exc:
+        # The directory is configured but unreachable or refusing us: an expired
+        # secret, missing admin consent, no network. 502, because the failure is
+        # upstream, and the message names the fix.
+        raise problems.ProblemError(
+            "directory_unavailable",
+            status=502,
+            title="Could not read the employee directory",
+            detail=str(exc),
+        ) from exc
+
+    truncated = len(found) > limit
+    page = found[:limit]
+
+    # Match the page against our own table in one query rather than one per
+    # row, so the picker can hand back an employee_id and avoid creating a
+    # duplicate record for somebody already known.
+    known = {
+        employee.email: employee.id
+        for employee in repositories.find_employees_by_emails(
+            session, [user.email for user in page]
+        )
+    }
+
+    return DirectorySearchResponse(
+        configured=True,
+        truncated=truncated,
+        users=[
+            DirectoryUserResponse(
+                external_id=user.external_id,
+                full_name=user.full_name,
+                email=user.email,
+                department=user.department,
+                job_title=user.job_title,
+                employee_id=known.get(user.email),
+            )
+            for user in page
+        ],
+    )
 
 
 @router.get("/{employee_id}", response_model=EmployeeResponse)

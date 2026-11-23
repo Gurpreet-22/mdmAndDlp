@@ -14,6 +14,7 @@ import type {
   DeviceSummary,
   DeviceUsbPolicyView,
   DebPackageInfoResponse,
+  DirectorySearchResponse,
   Employee,
   EnrollmentTokenResponse,
   InstallerInfoResponse,
@@ -71,6 +72,8 @@ export type {
   DebPackageInfoResponse,
   DevicePlatform,
   DeviceSummary,
+  DirectorySearchResponse,
+  DirectoryUserResponse,
   Employee,
   EnrollmentTokenResponse,
   FieldError,
@@ -79,6 +82,7 @@ export type {
   Problem,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
+  TokenEmployeeSummary,
   TokenResponse,
   UpdateEmployeeRequest,
   UserResponse,
@@ -393,10 +397,55 @@ export const api = {
   listEnrollmentTokens: (limit = 50) =>
     request<EnrollmentTokenResponse[]>("/api/v1/enrollment-tokens", { query: { limit } }),
 
-  createEnrollmentToken: (label: string | null, ttlSeconds: number) =>
+  /**
+   * Mint a token, optionally for a named employee.
+   *
+   * Takes an object rather than positional arguments because there are now
+   * four ways to describe the recipient and `create(null, 86400, null, …)` at
+   * the call site says nothing about which is which.
+   *
+   * Send `employeeId` for somebody already on the Employees page, or
+   * `employeeName` plus `employeeEmail` to match-or-create. Sending both is
+   * refused by the server, so the caller must pick one.
+   */
+  createEnrollmentToken: (body: {
+    label?: string | null;
+    ttlSeconds: number;
+    employeeId?: string | null;
+    employeeName?: string | null;
+    employeeEmail?: string | null;
+    department?: string | null;
+  }) =>
     request<CreateEnrollmentTokenResponse>("/api/v1/enrollment-tokens", {
       method: "POST",
-      body: { label: label || null, ttl_seconds: ttlSeconds },
+      // Omitted rather than sent as null when absent: the request model is
+      // `extra="forbid"` with a validator that rejects an employee id
+      // alongside an email, and sending both keys - even with one null - is
+      // clearer to read as "not provided" when it simply is not there.
+      body: {
+        label: body.label || null,
+        ttl_seconds: body.ttlSeconds,
+        ...(body.employeeId
+          ? { employee_id: body.employeeId }
+          : body.employeeEmail
+            ? {
+                employee_name: body.employeeName,
+                employee_email: body.employeeEmail,
+                department: body.department || null,
+              }
+            : {}),
+      },
+    }),
+
+  /**
+   * Search the Microsoft Entra ID directory.
+   *
+   * Returns `configured: false` rather than failing when no Entra credentials
+   * are set, which the caller should treat as "offer manual entry".
+   */
+  searchDirectory: (query: string, limit = 25) =>
+    request<DirectorySearchResponse>("/api/v1/employees/directory", {
+      query: { q: query || undefined, limit },
     }),
 
   revokeEnrollmentToken: (tokenId: string) =>

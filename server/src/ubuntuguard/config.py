@@ -93,6 +93,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Microsoft Entra ID (employee directory) --------------------------- #
+    # Read-only. The server calls Microsoft Graph with its own app credential
+    # (client credentials flow) to list employees, so an admin picks a real
+    # person when minting an enrollment token instead of typing a name twice.
+    # This is NOT sign-in: `allow_any_login` still governs that.
+    entra_tenant_id: str | None = Field(
+        default=None,
+        description=(
+            "Directory (tenant) ID of the Entra app registration, a GUID from the "
+            "app's Overview blade. Unset means no directory is configured and the "
+            "employee picker falls back to manual entry."
+        ),
+    )
+    entra_client_id: str | None = Field(
+        default=None,
+        description="Application (client) ID of the app registration. A GUID, not a secret.",
+    )
+    entra_client_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Client secret value from Certificates & secrets. Secret, so SecretStr. "
+            "Entra secrets expire (24 months maximum), so this will need rotating."
+        ),
+    )
+    entra_authority: str = Field(
+        default="https://login.microsoftonline.com",
+        description=(
+            "Token endpoint host. Only change this for a sovereign cloud "
+            "(US Gov, China); the tenant ID is appended to it."
+        ),
+    )
+    entra_graph_base_url: str = Field(
+        default="https://graph.microsoft.com/v1.0",
+        description="Microsoft Graph base URL. Same sovereign-cloud caveat as entra_authority.",
+    )
+
     # --- Proxy trust ------------------------------------------------------- #
     trusted_proxy_ips: frozenset[str] = Field(
         default=frozenset({"127.0.0.1", "::1"}),
@@ -195,6 +231,28 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _entra_credentials_are_all_or_nothing(self) -> Settings:
+        """Three values or none. Two out of three is a silent failure.
+
+        A half-configured directory looks configured: the employee picker would
+        offer itself, then every lookup would fail at the token request with an
+        opaque Graph error. Naming the missing variable at startup is cheaper.
+        """
+        provided = {
+            "entra_tenant_id": self.entra_tenant_id,
+            "entra_client_id": self.entra_client_id,
+            "entra_client_secret": self.entra_client_secret,
+        }
+        missing = sorted(name for name, value in provided.items() if value is None)
+        if missing and len(missing) != len(provided):
+            raise ValueError(
+                "Entra ID is partially configured; also set "
+                + ", ".join(f"{ENV_PREFIX}{name.upper()}" for name in missing)
+                + ", or unset all three to disable the directory"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _check_page_sizes(self) -> Settings:
         if not PAGE_SIZE.contains(self.default_page_size):
             raise ValueError(
@@ -210,6 +268,16 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "prod"
+
+    @property
+    def entra_configured(self) -> bool:
+        """True when the directory can be queried. The validator above makes
+        checking one field sufficient, but callers should not have to know that."""
+        return (
+            self.entra_tenant_id is not None
+            and self.entra_client_id is not None
+            and self.entra_client_secret is not None
+        )
 
     def require_database_url(self) -> str:
         """The database URL, or a message that says how to fix its absence."""

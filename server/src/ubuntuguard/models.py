@@ -350,6 +350,24 @@ class EnrollmentToken(Base):
     pre_registered_device_id: Mapped[uuid.UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), nullable=True
     )
+    #: Who the token was issued for. On enrollment the new device is assigned
+    #: to this employee automatically, which is the whole point: the
+    #: administrator minting the token already knows whose laptop it is, so
+    #: making them fill in a second form afterwards only produces devices that
+    #: sit unassigned because somebody forgot.
+    #:
+    #: Nullable, because a token can legitimately be for a shared or spare
+    #: machine that belongs to nobody yet.
+    #:
+    #: SET NULL on delete, not CASCADE: removing an employee must not erase the
+    #: record that a token was issued. The token outliving the employee is the
+    #: truth of the situation.
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         postgresql.UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

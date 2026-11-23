@@ -245,9 +245,10 @@ export default function DeviceDetailPage() {
             <Field label="Registered" value={device.registered_at} />
           </dl>
           <p className="muted small">
-            Supplied by an administrator, not by the device. Enrollment deliberately does
-            not overwrite any of it: a laptop does not get to rename itself or reassign
-            who it belongs to.
+            Supplied by an administrator, never by the device: a laptop does not get to
+            rename itself or choose who it belongs to. The owner is filled in from the
+            enrollment token when one named an employee, and an assignment already made
+            here is never overwritten by an enrolling device.
           </p>
         </div>
 

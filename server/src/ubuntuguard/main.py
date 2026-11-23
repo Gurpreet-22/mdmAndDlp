@@ -166,6 +166,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.device_resolver = None
     app.state.keys = None
 
+    # Constructed here rather than in the lifespan because construction does no
+    # I/O: the token and the member list are both fetched on first use. One
+    # instance per app so its caches are shared, which is the point of them.
+    from ubuntuguard.services.directory import EntraDirectory
+
+    app.state.directory = EntraDirectory(settings)
+
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestIdMiddleware)
 
