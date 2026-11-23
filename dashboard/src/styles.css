@@ -425,8 +425,17 @@ button.small {
   gap: 0.75rem;
   align-items: end;
 }
+/* The same form with one of its fields hidden. Without this the remaining
+   control inherits the wide first column and a dropdown of three fixed
+   choices ends up half the page across. */
+.inline-form.two-up {
+  grid-template-columns: minmax(9rem, 14rem) auto;
+  justify-content: start;
+}
+
 @media (max-width: 640px) {
-  .inline-form {
+  .inline-form,
+  .inline-form.two-up {
     grid-template-columns: 1fr;
   }
 }

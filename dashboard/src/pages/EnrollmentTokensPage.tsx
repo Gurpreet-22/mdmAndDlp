@@ -143,18 +143,38 @@ export default function EnrollmentTokensPage() {
       <div className="card">
         <h2>Create a token</h2>
 
-        <EmployeePicker value={employee} onChange={setEmployee} disabled={busy} />
+        <EmployeePicker
+          value={employee}
+          onChange={(next) => {
+            setEmployee(next);
+            // The note field is hidden once somebody is chosen, so anything
+            // already typed into it would be submitted invisibly.
+            if (next) setLabel("");
+          }}
+          disabled={busy}
+        />
 
-        <div className="inline-form" style={{ marginTop: "1rem" }}>
-          <div>
-            <label htmlFor="label">Note (optional)</label>
-            <input
-              id="label"
-              value={label}
-              placeholder="e.g. loaner from the Delhi shelf"
-              onChange={(event) => setLabel(event.target.value)}
-            />
-          </div>
+        {/* Two columns rather than three once the note is hidden, or the grid
+            stretches the TTL select across the space the note vacated. */}
+        <div
+          className={employee ? "inline-form two-up" : "inline-form"}
+          style={{ marginTop: "1rem" }}
+        >
+          {/* Only without an employee. With one, the person's name identifies
+              the token in the list and a second free-text field is just
+              somewhere else to type the same thing. Without one - a spare or
+              shared machine - this is the only handle it has. */}
+          {!employee && (
+            <div>
+              <label htmlFor="label">Which machine? (optional)</label>
+              <input
+                id="label"
+                value={label}
+                placeholder="e.g. loaner from the Delhi shelf"
+                onChange={(event) => setLabel(event.target.value)}
+              />
+            </div>
+          )}
           <div>
             <label htmlFor="ttl">Valid for</label>
             <select
