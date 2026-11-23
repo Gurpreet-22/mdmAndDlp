@@ -484,6 +484,20 @@ class EnrollRequest(StrictModel):
     total_ram_bytes: int | None = Field(default=None, ge=0)
     disk_total_bytes: int | None = Field(default=None, ge=0)
     disk_free_bytes: int | None = Field(default=None, ge=0)
+    manufacturer: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Make from DMI, e.g. 'LENOVO'. Stored as reported_manufacturer, never "
+            "into the administrator's manufacturer field: a device does not get to "
+            "restate its own asset record."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Model from DMI, e.g. 'ThinkPad T14 Gen 1'. Stored as reported_model.",
+    )
 
 
 class PolicyPublicKey(BaseModel):
@@ -577,6 +591,16 @@ class DeviceDetail(DeviceSummary):
     total_ram_bytes: int | None = None
     disk_total_bytes: int | None = None
     disk_free_bytes: int | None = None
+    reported_manufacturer: str | None = Field(
+        default=None,
+        description=(
+            "Make as the firmware reports it. Separate from `manufacturer`, which is "
+            "what an administrator entered, so the two can disagree visibly."
+        ),
+    )
+    reported_model: str | None = Field(
+        default=None, description="Model as the firmware reports it."
+    )
 
 
 class RegisterDeviceRequest(StrictModel):
@@ -720,6 +744,12 @@ class HeartbeatRequest(StrictModel):
     total_ram_bytes: int | None = Field(default=None, ge=0)
     disk_total_bytes: int | None = Field(default=None, ge=0)
     disk_free_bytes: int | None = Field(default=None, ge=0)
+    manufacturer: str | None = Field(
+        default=None, max_length=64, description="Make from DMI. Stored as reported."
+    )
+    model: str | None = Field(
+        default=None, max_length=120, description="Model from DMI. Stored as reported."
+    )
 
 
 class HeartbeatResponse(BaseModel):

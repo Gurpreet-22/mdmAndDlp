@@ -62,6 +62,38 @@ _MACHINE_ID_PATHS = ("etc/machine-id", "var/lib/dbus/machine-id")
 _DMI_PRODUCT_UUID_PATH = "sys/class/dmi/id/product_uuid"
 _DMI_SYS_VENDOR_PATH = "sys/class/dmi/id/sys_vendor"
 _DMI_PRODUCT_NAME_PATH = "sys/class/dmi/id/product_name"
+#: The human-readable model. On a ThinkPad `product_name` is the SKU
+#: ("20S1S3B00F") while `product_version` is "ThinkPad T14 Gen 1", which is
+#: what an operator looking at a fleet list actually wants.
+_DMI_PRODUCT_VERSION_PATH = "sys/class/dmi/id/product_version"
+
+#: Values firmware writes when the field was never programmed. Lowercased for
+#: comparison. Reporting these would be worse than reporting nothing: the
+#: dashboard would show "To Be Filled By O.E.M." as a model and an operator
+#: would reasonably read it as a real string the agent had found.
+_DMI_PLACEHOLDERS = frozenset(
+    {
+        "",
+        "none",
+        "n/a",
+        "na",
+        "unknown",
+        "default string",
+        "not available",
+        "not specified",
+        "no asset information",
+        "to be filled by o.e.m.",
+        "to be filled by oem",
+        "system product name",
+        "system manufacturer",
+        "system version",
+        "oem",
+        "o.e.m.",
+        "invalid",
+        "chassis manufacture",
+        "chassis version",
+    }
+)
 _CPUINFO_PATH = "proc/cpuinfo"
 _MEMINFO_PATH = "proc/meminfo"
 _NET_CLASS_DIR = "sys/class/net"
@@ -164,6 +196,41 @@ class UbuntuAdapter:
             if value:
                 return sha256_hex(value)
         return None
+
+    def _dmi_string(self, relative: str) -> str | None:
+        """A DMI string field, or None if it holds a firmware placeholder.
+
+        Bounded at 120 characters to match the server column, so an absurd
+        value becomes a truncated one rather than a rejected request.
+        """
+        text = _read_text(self._root / relative)
+        if text is None:
+            return None
+        value = " ".join(text.split())
+        if value.lower() in _DMI_PLACEHOLDERS:
+            return None
+        return value[:120] or None
+
+    def manufacturer(self) -> str | None:
+        """Hardware vendor from DMI, e.g. "LENOVO". World-readable.
+
+        Bounded at 64 rather than 120: that is the width of the server's
+        manufacturer column, and these two are meant to be comparable.
+        """
+        value = self._dmi_string(_DMI_SYS_VENDOR_PATH)
+        return value[:64] if value else None
+
+    def model(self) -> str | None:
+        """Hardware model, preferring the readable name over the SKU.
+
+        `product_version` first because on ThinkPads that is "ThinkPad T14
+        Gen 1" while `product_name` is "20S1S3B00F". On hardware that gets this
+        the other way round, or leaves version as a placeholder, the fallback
+        keeps a useful answer rather than none.
+        """
+        return self._dmi_string(_DMI_PRODUCT_VERSION_PATH) or self._dmi_string(
+            _DMI_PRODUCT_NAME_PATH
+        )
 
     def dmi_product_uuid_hash(self) -> str | None:
         """SHA-256 of the DMI product UUID, or None - usually None.
@@ -331,6 +398,8 @@ class UbuntuAdapter:
             total_ram_bytes=self.total_ram_bytes(),
             disk_total_bytes=disk_total,
             disk_free_bytes=disk_free,
+            manufacturer=self.manufacturer(),
+            model=self.model(),
         )
 
     def is_supported(self) -> bool:

@@ -211,6 +211,13 @@ export interface DeviceDetail extends DeviceSummary {
   total_ram_bytes: number | null;
   disk_total_bytes: number | null;
   disk_free_bytes: number | null;
+  /**
+   * Make and model as the firmware reports them. Separate from `manufacturer`
+   * and `model`, which are what an administrator entered, so the two can
+   * disagree visibly rather than one silently overwriting the other.
+   */
+  reported_manufacturer: string | null;
+  reported_model: string | null;
 }
 
 /**

@@ -234,6 +234,8 @@ def enroll(
             total_ram_bytes=request.total_ram_bytes,
             disk_total_bytes=request.disk_total_bytes,
             disk_free_bytes=request.disk_free_bytes,
+            manufacturer=request.manufacturer,
+            model=request.model,
         )
     else:
         # No pre-registration, or the row is already enrolled or revoked. Either
@@ -261,6 +263,17 @@ def enroll(
             total_ram_bytes=request.total_ram_bytes,
             disk_total_bytes=request.disk_total_bytes,
             disk_free_bytes=request.disk_free_bytes,
+            # `create_device` builds the row directly, so these are the column
+            # names rather than the request's. Reported, never the
+            # administrator's `manufacturer`/`model`.
+            reported_manufacturer=request.manufacturer,
+            reported_model=request.model,
+            # Enrollment is the first time inventory arrives for this row.
+            last_inventory_at=now,
+            # Derived from the OS the device reported. A self-enrolled laptop
+            # never had an administrator to choose a platform, and leaving it
+            # blank was only a gap.
+            platform=repositories.platform_for_os(request.os.id),
         )
 
     certificate = issue_device_certificate(keys.ca, csr, str(device.id), now=now)

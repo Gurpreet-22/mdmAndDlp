@@ -98,6 +98,8 @@ def _detail(device: Device, now: dt.datetime) -> DeviceDetail:
         total_ram_bytes=device.total_ram_bytes,
         disk_total_bytes=device.disk_total_bytes,
         disk_free_bytes=device.disk_free_bytes,
+        reported_manufacturer=device.reported_manufacturer,
+        reported_model=device.reported_model,
     )
 
 
@@ -507,6 +509,8 @@ def heartbeat(
         total_ram_bytes=body.total_ram_bytes,
         disk_total_bytes=body.disk_total_bytes,
         disk_free_bytes=body.disk_free_bytes,
+        manufacturer=body.manufacturer,
+        model=body.model,
     )
     repositories.resolve_offline_incidents_for_device(session, row.id)
 

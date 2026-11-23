@@ -317,6 +317,18 @@ class Device(Base):
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    #: Make and model as the firmware reports them, e.g. "LENOVO" and
+    #: "ThinkPad T14 Gen 1", read from world-readable DMI by the agent.
+    #:
+    #: Deliberately NOT written into `manufacturer` and `model` above. Those
+    #: are the administrator's record, and enrollment is guaranteed not to
+    #: overwrite administrator-supplied fields; letting a device fill them
+    #: would retire that guarantee in exchange for two strings. Kept apart, a
+    #: disagreement between the asset record and the firmware stays visible,
+    #: which is the case worth seeing.
+    reported_manufacturer: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reported_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
     # A fingerprint collision does not block enrollment. The new device is
     # created as distinct and flagged, because a reimaged laptop and a cloned
     # VM look identical here and only a human can tell them apart.

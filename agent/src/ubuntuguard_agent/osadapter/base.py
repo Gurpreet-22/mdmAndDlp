@@ -107,6 +107,20 @@ class HostFacts:
     disk_total_bytes: int | None = None
     disk_free_bytes: int | None = None
 
+    #: Make and model from DMI, e.g. "LENOVO" and "ThinkPad T14 Gen 1".
+    #:
+    #: Unlike `product_uuid` above, these files are world-readable, so the
+    #: unprivileged agent does get them. Collected because an operator looking
+    #: at a laptop wants to know what it is, and because it was being typed in
+    #: by hand on a form when the hardware already knows the answer.
+    #:
+    #: Reported, never authoritative. The server stores these separately from
+    #: the manufacturer and model an administrator entered, so a device cannot
+    #: rewrite its own asset record - see `reported_manufacturer` on the server
+    #: model and the enrollment guarantee it protects.
+    manufacturer: str | None = None
+    model: str | None = None
+
 
 @runtime_checkable
 class OsAdapter(Protocol):

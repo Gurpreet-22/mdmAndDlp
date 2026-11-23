@@ -343,6 +343,12 @@ def build_enroll_payload(
         payload["disk_total_bytes"] = facts.disk_total_bytes
     if facts.disk_free_bytes:
         payload["disk_free_bytes"] = facts.disk_free_bytes
+    # Reported, not authoritative: the server keeps these apart from the
+    # manufacturer and model an administrator entered.
+    if facts.manufacturer:
+        payload["manufacturer"] = facts.manufacturer
+    if facts.model:
+        payload["model"] = facts.model
     return payload
 
 

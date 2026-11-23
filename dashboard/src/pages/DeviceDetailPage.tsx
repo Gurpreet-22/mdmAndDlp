@@ -20,11 +20,32 @@ function formatBytes(bytes: number | null | undefined): string | null {
   return `${gb.toFixed(1)} GB`;
 }
 
-function Field({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
+function Field({
+  label,
+  value,
+  mono,
+  fallback,
+}: {
+  label: string;
+  value: string | null;
+  mono?: boolean;
+  /**
+   * Shown, marked as the device's own answer, when `value` is empty.
+   *
+   * For the fields an administrator may fill in but the hardware already
+   * knows, like make and model. Marking it matters: an unmarked value here
+   * would read as something a person had entered and checked.
+   */
+  fallback?: string | null;
+}) {
+  const showFallback = value === null && Boolean(fallback);
   return (
     <div className="field">
       <dt>{label}</dt>
-      <dd className={mono ? "mono small" : undefined}>{value ?? "—"}</dd>
+      <dd className={mono ? "mono small" : undefined}>
+        {value ?? (showFallback ? fallback : "—")}
+        {showFallback && <span className="muted small"> · from device</span>}
+      </dd>
     </div>
   );
 }
@@ -234,9 +255,16 @@ export default function DeviceDetailPage() {
             )}
           </div>
           <dl>
+            {/* Device name has no fallback on purpose: it is a human label
+                like "finance laptop 014" and the hardware cannot know it. The
+                device's own name is Hostname, under Identity. */}
             <Field label="Device name" value={device.display_name} />
-            <Field label="Manufacturer" value={device.manufacturer} />
-            <Field label="Model" value={device.model} />
+            <Field
+              label="Manufacturer"
+              value={device.manufacturer}
+              fallback={device.reported_manufacturer}
+            />
+            <Field label="Model" value={device.model} fallback={device.reported_model} />
             <Field label="Issued to" value={device.assigned_to_name} />
             <Field label="Employee email" value={device.assigned_to_email} />
             <Field label="Department" value={device.department} />
@@ -248,7 +276,8 @@ export default function DeviceDetailPage() {
             Supplied by an administrator, never by the device: a laptop does not get to
             rename itself or choose who it belongs to. The owner is filled in from the
             enrollment token when one named an employee, and an assignment already made
-            here is never overwritten by an enrolling device.
+            here is never overwritten by an enrolling device. Where a field is blank, the
+            make and model the firmware reports are shown instead and marked as such.
           </p>
         </div>
 
@@ -282,6 +311,11 @@ export default function DeviceDetailPage() {
             />
             <Field label="Kernel" value={device.kernel} mono />
             <Field label="Architecture" value={device.arch} />
+            {/* Reported by the firmware, and shown here rather than on the
+                Assignment card because that card is the administrator's
+                record. When the two disagree, both stay visible. */}
+            <Field label="Make" value={device.reported_manufacturer} />
+            <Field label="Model" value={device.reported_model} />
             <Field
               label="Processor (CPU)"
               value={

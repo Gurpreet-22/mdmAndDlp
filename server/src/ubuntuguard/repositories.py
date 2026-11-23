@@ -643,13 +643,18 @@ def claim_pending_device(
     total_ram_bytes: int | None = None,
     disk_total_bytes: int | None = None,
     disk_free_bytes: int | None = None,
+    manufacturer: str | None = None,
+    model: str | None = None,
 ) -> Device:
     """Fill in a registered device's row at enrollment.
 
     This is what stops "an admin added the laptop" and "the laptop arrived"
     producing two rows for one machine. The administrator's own fields
-    (display_name, assignee, asset tag) are deliberately NOT touched: the device
-    does not get to rename itself or reassign who it belongs to.
+    (display_name, assignee, asset tag, manufacturer, model) are deliberately
+    NOT touched: the device does not get to rename itself, restate its own make
+    or reassign who it belongs to. The make and model it reports land in
+    `reported_manufacturer` and `reported_model` instead, where they can be
+    compared with the asset record rather than overwriting it.
     """
     device.status = "active"
     device.hostname = hostname
@@ -677,8 +682,38 @@ def claim_pending_device(
         device.disk_total_bytes = disk_total_bytes
     if disk_free_bytes is not None:
         device.disk_free_bytes = disk_free_bytes
+    if manufacturer is not None:
+        device.reported_manufacturer = manufacturer[:64]
+    if model is not None:
+        device.reported_model = model[:120]
+    # Enrollment is the first time inventory arrives, so it counts.
+    device.last_inventory_at = enrolled_at
+    # The platform follows from the OS the device reported, so leaving it blank
+    # on a self-enrolled laptop was only ever a gap. Never overwritten: an
+    # administrator who chose one has said something the device cannot improve on.
+    if device.platform is None:
+        device.platform = platform_for_os(os_id)
     session.flush()
     return device
+
+
+def platform_for_os(os_id: str | None) -> str | None:
+    """Map a reported os-release ID onto one of the known platforms.
+
+    Returns None for anything unrecognised rather than guessing, because the
+    column has a CHECK constraint and a wrong guess would fail the enrollment
+    of a laptop that was otherwise fine.
+    """
+    if os_id is None:
+        return None
+    lowered = os_id.strip().lower()
+    if lowered in {"ubuntu", "debian", "linuxmint", "pop", "fedora", "rhel", "centos", "arch"}:
+        return "linux"
+    if lowered in {"macos", "darwin"}:
+        return "macos"
+    if lowered in {"windows"}:
+        return "windows"
+    return None
 
 
 def get_device(session: Session, device_id: uuid.UUID) -> Device | None:
@@ -894,22 +929,46 @@ def touch_heartbeat(
     total_ram_bytes: int | None = None,
     disk_total_bytes: int | None = None,
     disk_free_bytes: int | None = None,
+    manufacturer: str | None = None,
+    model: str | None = None,
 ) -> None:
-    device.last_heartbeat_at = dt.datetime.now(dt.UTC)
+    now = dt.datetime.now(dt.UTC)
+    device.last_heartbeat_at = now
     if agent_version:
         device.agent_version = agent_version[:64]
     if primary_adapter_ip:
         device.primary_adapter_ip = primary_adapter_ip[:45]
+
+    # Inventory is optional on a heartbeat: an older agent, or one that could
+    # not read /proc, sends none of it. Tracked so `last_inventory_at` means
+    # "when inventory last actually arrived" rather than "when this device last
+    # said hello", which are different questions and the dashboard asks the
+    # first one.
+    reported_inventory = False
     if cpu_model is not None:
         device.cpu_model = cpu_model[:128]
+        reported_inventory = True
     if cpu_cores is not None:
         device.cpu_cores = cpu_cores
+        reported_inventory = True
     if total_ram_bytes is not None:
         device.total_ram_bytes = total_ram_bytes
+        reported_inventory = True
     if disk_total_bytes is not None:
         device.disk_total_bytes = disk_total_bytes
+        reported_inventory = True
     if disk_free_bytes is not None:
         device.disk_free_bytes = disk_free_bytes
+        reported_inventory = True
+    if manufacturer is not None:
+        device.reported_manufacturer = manufacturer[:64]
+        reported_inventory = True
+    if model is not None:
+        device.reported_model = model[:120]
+        reported_inventory = True
+
+    if reported_inventory:
+        device.last_inventory_at = now
     session.flush()
 
 
