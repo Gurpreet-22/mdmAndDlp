@@ -1084,6 +1084,20 @@ def list_assigned_devices(session: Session) -> Sequence[Device]:
     )
 
 
+def devices_assigned_to_employee(session: Session, employee_id: uuid.UUID) -> Sequence[Device]:
+    """Devices currently assigned to this employee.
+
+    Current, not historical: a closed assignment interval is a record of the
+    past and is no reason to stop anything. Used to refuse deleting somebody
+    who still holds hardware.
+    """
+    return list(
+        session.scalars(
+            select(Device).where(Device.assigned_to_id == employee_id).order_by(Device.hostname)
+        ).all()
+    )
+
+
 def find_devices_by_ids(session: Session, ids: Sequence[uuid.UUID]) -> Sequence[Device]:
     """Every device in `ids`. One statement, for labelling a page of rows."""
     wanted = set(ids)

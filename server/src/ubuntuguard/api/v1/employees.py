@@ -86,7 +86,7 @@ def create_employee(
     body: EmployeeCreateRequest,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+    principal: Principal = Depends(require_capability(Capability.EMPLOYEE_MANAGE)),
 ) -> EmployeeResponse:
     """Create a new employee profile."""
     existing = repositories.get_employee_by_email(session, body.email)
@@ -305,7 +305,7 @@ def update_employee(
     body: EmployeeUpdateRequest,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+    principal: Principal = Depends(require_capability(Capability.EMPLOYEE_MANAGE)),
 ) -> EmployeeResponse:
     """Update employee details."""
     emp = repositories.get_employee(session, employee_id)
@@ -349,12 +349,37 @@ def delete_employee(
     employee_id: uuid.UUID,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_capability(Capability.ENROLLMENT_TOKEN_MANAGE)),
+    principal: Principal = Depends(require_capability(Capability.EMPLOYEE_MANAGE)),
 ) -> None:
-    """Delete an employee profile."""
+    """Delete an employee record. Refused while they still hold a device.
+
+    For a row created by mistake. Somebody who has left should be set to
+    `offboarded` instead, which keeps the record, keeps the assignment history
+    joined up, and stops them being offered for new assignments.
+    """
     emp = repositories.get_employee(session, employee_id)
     if emp is None:
         raise problems.not_found("employee")
+
+    # Refused while they still hold hardware. The foreign keys are ON DELETE
+    # SET NULL, so deleting was not loud about the damage it did: the
+    # assignment history survived with `employee_id` NULL and the device went
+    # on displaying a name that pointed at nobody, which is worse than either
+    # keeping the record or clearing it properly.
+    #
+    # Offboarding is the right verb for somebody who has left. It keeps the
+    # record, keeps the history joined up, and stops them being offered for new
+    # assignments. Deleting is for a row created by mistake.
+    held = repositories.devices_assigned_to_employee(session, employee_id)
+    if held:
+        raise problems.conflict(
+            "employee_holds_devices",
+            f"{emp.full_name} is still assigned "
+            f"{len(held)} device{'s' if len(held) > 1 else ''} "
+            f"({', '.join(d.hostname or str(d.id)[:8] for d in held[:3])}"
+            f"{', …' if len(held) > 3 else ''}). Unassign them first, or set this "
+            "employee's status to offboarded to keep the record and its history.",
+        )
 
     audit.append(
         session,

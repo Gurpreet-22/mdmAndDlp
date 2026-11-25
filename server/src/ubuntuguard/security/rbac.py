@@ -47,6 +47,17 @@ class Capability(StrEnum):
     # the word "token". Suppressed here rather than disabled globally, because
     # S105 is worth keeping for the code that handles actual tokens.
     ENROLLMENT_TOKEN_MANAGE = "enrollment_token_manage"  # noqa: S105
+    # Creating, editing, offboarding and deleting employee records.
+    #
+    # Added because the employee write routes were guarded by
+    # ENROLLMENT_TOKEN_MANAGE, which meant anyone who could issue an enrollment
+    # token could also delete an employee and the assignment history attached
+    # to them. Those are different privileges and now say so.
+    #
+    # Granted to exactly the roles that already hold ENROLLMENT_TOKEN_MANAGE,
+    # so no administrator gains or loses access today. The point is that the
+    # two can now be separated without touching a single route.
+    EMPLOYEE_MANAGE = "employee_manage"
     POLICY_READ = "policy_read"
     POLICY_WRITE = "policy_write"
     EVENT_READ = "event_read"
@@ -81,6 +92,7 @@ _MATRIX: dict[Role, dict[Capability, bool]] = {
         Capability.DEVICE_READ: _T,
         Capability.DEVICE_REVOKE: _T,
         Capability.ENROLLMENT_TOKEN_MANAGE: _T,
+        Capability.EMPLOYEE_MANAGE: _T,
         Capability.POLICY_READ: _T,
         Capability.POLICY_WRITE: _T,
         Capability.EVENT_READ: _T,
@@ -96,6 +108,7 @@ _MATRIX: dict[Role, dict[Capability, bool]] = {
         Capability.DEVICE_READ: _T,
         Capability.DEVICE_REVOKE: _T,
         Capability.ENROLLMENT_TOKEN_MANAGE: _T,
+        Capability.EMPLOYEE_MANAGE: _T,
         Capability.POLICY_READ: _T,
         Capability.POLICY_WRITE: _T,
         Capability.EVENT_READ: _T,
@@ -113,6 +126,7 @@ _MATRIX: dict[Role, dict[Capability, bool]] = {
         Capability.DEVICE_READ: _T,
         Capability.DEVICE_REVOKE: _F,
         Capability.ENROLLMENT_TOKEN_MANAGE: _F,
+        Capability.EMPLOYEE_MANAGE: _F,
         Capability.POLICY_READ: _T,
         Capability.POLICY_WRITE: _F,
         Capability.EVENT_READ: _T,
@@ -131,6 +145,7 @@ _MATRIX: dict[Role, dict[Capability, bool]] = {
         Capability.DEVICE_READ: _T,
         Capability.DEVICE_REVOKE: _F,
         Capability.ENROLLMENT_TOKEN_MANAGE: _F,
+        Capability.EMPLOYEE_MANAGE: _F,
         Capability.POLICY_READ: _T,
         Capability.POLICY_WRITE: _F,
         Capability.EVENT_READ: _T,

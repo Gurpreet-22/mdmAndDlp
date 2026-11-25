@@ -335,6 +335,28 @@ def assign_device(
     if device.status == "revoked":
         raise problems.conflict("device_already_revoked", "Cannot assign a revoked device.")
 
+    # An employee id that resolves to nothing, or to somebody who has left.
+    #
+    # The second case was silently accepted: `status` existed on employees,
+    # nothing consulted it, and a laptop could be handed to an offboarded
+    # person while the offboarding review on the Devices page was
+    # simultaneously flagging exactly that situation. The two now agree.
+    #
+    # Only checked when an id is given. A free-text name with no id is how a
+    # contractor or a shared machine gets recorded, and there is no status to
+    # consult for one.
+    if body.employee_id is not None:
+        employee = repositories.get_employee(session, body.employee_id)
+        if employee is None:
+            raise problems.not_found("employee")
+        if employee.status != "active":
+            raise problems.conflict(
+                "employee_not_active",
+                f"{employee.full_name} is marked {employee.status}, so a device cannot "
+                "be assigned to them. Set the employee back to active first, or assign "
+                "the device to somebody else.",
+            )
+
     user_id = uuid.UUID(principal.user_id) if principal.user_id else None
     assignment = repositories.assign_device(
         session,

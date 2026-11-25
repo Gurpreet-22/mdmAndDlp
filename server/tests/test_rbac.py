@@ -32,6 +32,7 @@ EXPECTED: dict[str, dict[str, bool]] = {
         "device_read": True,
         "device_revoke": True,
         "enrollment_token_manage": True,
+        "employee_manage": True,
         "policy_read": True,
         "policy_write": True,
         "event_read": True,
@@ -47,6 +48,7 @@ EXPECTED: dict[str, dict[str, bool]] = {
         "device_read": True,
         "device_revoke": True,
         "enrollment_token_manage": True,
+        "employee_manage": True,
         "policy_read": True,
         "policy_write": True,
         "event_read": True,
@@ -62,6 +64,7 @@ EXPECTED: dict[str, dict[str, bool]] = {
         "device_read": True,
         "device_revoke": False,
         "enrollment_token_manage": False,
+        "employee_manage": False,
         "policy_read": True,
         "policy_write": False,
         "event_read": True,
@@ -77,6 +80,7 @@ EXPECTED: dict[str, dict[str, bool]] = {
         "device_read": True,
         "device_revoke": False,
         "enrollment_token_manage": False,
+        "employee_manage": False,
         "policy_read": True,
         "policy_write": False,
         "event_read": True,
@@ -113,11 +117,16 @@ def test_expected_table_covers_every_role_and_capability() -> None:
         assert set(row) == {cap.value for cap in Capability}, f"EXPECTED[{role}] is out of date"
 
 
-def test_matrix_has_52_cells() -> None:
-    """4 roles times 13 capabilities. Catches an accidental enum deletion."""
+def test_matrix_has_56_cells() -> None:
+    """4 roles times 14 capabilities. Catches an accidental enum deletion.
+
+    Was 13 capabilities until EMPLOYEE_MANAGE was added. The employee write
+    routes had been guarded by ENROLLMENT_TOKEN_MANAGE, so issuing a token and
+    deleting an employee were the same privilege; they are separable now.
+    """
     assert len(Role) == 4
-    assert len(Capability) == 13
-    assert len(ALL_CELLS) == 52
+    assert len(Capability) == 14
+    assert len(ALL_CELLS) == 56
 
 
 def test_require_raises_for_a_denied_capability() -> None:

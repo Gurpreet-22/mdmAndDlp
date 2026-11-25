@@ -97,8 +97,43 @@ generate_password() {
   fi
 }
 
+# Settings this script owns. Anything else in .env was put there by a human and
+# must survive being rewritten - see preserve_extra_settings below.
+readonly MANAGED_KEYS=(
+  UBUNTUGUARD_ENVIRONMENT
+  UBUNTUGUARD_DATABASE_URL
+  UBUNTUGUARD_MIGRATION_DATABASE_URL
+  UBUNTUGUARD_POLICY_SIGNING_KEY_PATH
+  UBUNTUGUARD_CA_KEY_PATH
+  UBUNTUGUARD_CA_CERT_PATH
+  UBUNTUGUARD_INSTALLER_DIR
+)
+
+# Every UBUNTUGUARD_* line in the current .env that this script does not manage.
+#
+# This function exists because of a real loss. `write_env_file` used to do a
+# plain `cat > .env`, so recreating the database silently destroyed anything a
+# human had added - and it did: a set of Microsoft Entra credentials, including
+# a client secret that could not be recovered and had to be reissued. Nothing
+# warned, because the script had no idea those lines were there.
+preserve_extra_settings() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+  local line key
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    local managed=0 m
+    for m in "${MANAGED_KEYS[@]}"; do
+      [[ "${key}" == "${m}" ]] && managed=1 && break
+    done
+    (( managed )) || printf '%s\n' "${line}"
+  done < <(grep -E '^UBUNTUGUARD_[A-Z0-9_]+=' "${ENV_FILE}" || true)
+}
+
 write_env_file() {
   local owner_pw="$1" app_pw="$2"
+  local extra
+  extra="$(preserve_extra_settings)"
+
   # Created with restrictive permissions rather than chmod'ed afterwards: a
   # chmod leaves a window in which the file exists and is world-readable.
   ( umask 077; cat > "${ENV_FILE}" <<EOF
@@ -118,8 +153,25 @@ UBUNTUGUARD_CA_CERT_PATH=var/ca.crt
 UBUNTUGUARD_INSTALLER_DIR=var/installer
 EOF
   )
+
+  # Appended, not merged into the heredoc, so a hand-added secret is never
+  # interpolated through the shell a second time.
+  if [[ -n "${extra}" ]]; then
+    ( umask 077; {
+        printf '\n# --- Kept from the previous .env ---\n'
+        printf '# Added by hand, not by this script. Preserved across a database\n'
+        printf '# rebuild; delete the line if you no longer want the setting.\n'
+        printf '%s\n' "${extra}"
+      } >> "${ENV_FILE}" )
+  fi
+
   chmod 600 "${ENV_FILE}"
   ok "wrote ${ENV_FILE#"${SERVER_DIR}"/} (mode 0600, gitignored)"
+  if [[ -n "${extra}" ]]; then
+    # Named, never printed with values: this runs in terminals and CI logs.
+    ok "kept $(printf '%s\n' "${extra}" | wc -l) hand-added setting(s): $(
+         printf '%s\n' "${extra}" | cut -d= -f1 | paste -sd, )"
+  fi
 }
 
 read_env_value() {
