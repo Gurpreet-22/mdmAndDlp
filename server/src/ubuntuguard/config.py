@@ -129,6 +129,21 @@ class Settings(BaseSettings):
         description="Microsoft Graph base URL. Same sovereign-cloud caveat as entra_authority.",
     )
 
+    # --- Background offline sweep ------------------------------------------ #
+    offline_sweep_seconds: int = Field(
+        default=120,
+        ge=0,
+        le=3600,
+        description=(
+            "How often to scan for devices that have stopped checking in. 0 disables "
+            "the sweep entirely, leaving the dashboard's manual button as the only "
+            "trigger. Until this existed, a laptop could go dark and nothing noticed "
+            "until somebody happened to click that button. Shorter than the 240s "
+            "offline threshold on purpose, so a device is flagged within roughly one "
+            "sweep of crossing it rather than up to a whole interval later."
+        ),
+    )
+
     # --- Proxy trust ------------------------------------------------------- #
     trusted_proxy_ips: frozenset[str] = Field(
         default=frozenset({"127.0.0.1", "::1"}),

@@ -12,10 +12,12 @@ reachable only through nginx. See `security/device_auth.py`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from typing import cast
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -91,7 +93,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     exits immediately tells an operator far less than one that answers "not
     ready, database unreachable".
     """
-    settings: Settings = app.state.settings
+    settings = cast("Settings", app.state.settings)
 
     if settings.allow_any_login:
         # Loud on purpose. The one way this setting causes real harm is by being
@@ -133,11 +135,95 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.keys_error = str(exc)
         logger.warning("key material not available: %s", exc)
 
+    # Noticing a dark laptop without being asked to. Started last, so a failure
+    # here cannot stop the database or the keys from loading.
+    sweep_task = _start_offline_sweep(app, settings)
+
     yield
+
+    if sweep_task is not None:
+        sweep_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep_task
 
     engine = getattr(app.state, "engine", None)
     if engine is not None:
         engine.dispose()
+
+
+def _start_offline_sweep(app: FastAPI, settings: Settings) -> asyncio.Task[None] | None:
+    """Scan periodically for devices that have stopped checking in.
+
+    Why this exists: the sweep was only ever triggered by a button in the
+    dashboard, so a laptop could stop reporting and nothing would notice until
+    somebody happened to click it. An alerting system that waits to be asked is
+    not alerting.
+
+    Three things it deliberately does not do.
+
+    It does not run without a database, and it does not run when the interval
+    is zero, so an operator who wants the old manual-only behaviour can have it
+    with `UBUNTUGUARD_OFFLINE_SWEEP_SECONDS=0`.
+
+    It never lets an exception escape. A failed sweep logs and waits for the
+    next one; crashing the task would silently end all future sweeps, which is
+    the same outcome as not having it and harder to notice.
+
+    It does not coordinate between processes. Run several workers and each will
+    sweep, which is harmless rather than merely tolerable: the duplicate check
+    in `check_offline_devices` means the second one through finds the incident
+    already open and creates nothing.
+    """
+    if settings.offline_sweep_seconds <= 0:
+        logger.info("background offline sweep disabled (offline_sweep_seconds=0)")
+        return None
+    if getattr(app.state, "session_factory", None) is None:
+        logger.warning("background offline sweep not started: no database")
+        return None
+
+    interval = settings.offline_sweep_seconds
+
+    async def sweep_forever() -> None:
+        # One interval before the first run. At startup every device looks
+        # silent because no beat has arrived at THIS process yet, and a sweep
+        # on second zero would raise incidents for a fleet that is merely
+        # waiting for its next heartbeat.
+        while True:
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            try:
+                await asyncio.to_thread(_run_one_sweep, app)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - logged, never fatal to the loop
+                logger.exception("background offline sweep failed; will retry")
+
+    logger.info("background offline sweep every %ds", interval)
+    return asyncio.create_task(sweep_forever())
+
+
+def _run_one_sweep(app: FastAPI) -> None:
+    """One pass, in a worker thread because the database driver is synchronous."""
+    from ubuntuguard import repositories
+
+    factory = app.state.session_factory
+    with factory() as session:
+        checked, flagged, new_incidents, _ = repositories.check_offline_devices(session)
+        if new_incidents:
+            session.commit()
+            logger.warning(
+                "offline sweep: %d of %d devices silent, %d new incident(s) raised",
+                flagged,
+                checked,
+                new_incidents,
+            )
+        else:
+            # Rolled back rather than committed: with nothing new to record
+            # there is no reason to hold a write transaction open, and this
+            # runs on a timer forever.
+            session.rollback()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

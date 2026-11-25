@@ -28,6 +28,7 @@ from pydantic import (
 from ubuntuguard.constants import (
     ENROLLMENT_TOKEN_DEFAULT_TTL_SECONDS,
 )
+from ubuntuguard.liveness import offline_threshold_seconds
 from ubuntuguard.security.passwords import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH
 
 Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -940,8 +941,102 @@ class DeviceAssignmentResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+IncidentStatus = Literal["open", "acknowledged", "investigating", "resolved", "false_positive"]
+IncidentKind = Literal[
+    "usb_blocked",
+    "clone_suspected",
+    "policy_rollback_failed",
+    "enforcer_unavailable",
+    "capability_lost",
+    "audit_chain_broken",
+    "device_offline",
+]
+
+
+class IncidentResponse(BaseModel):
+    """One alert raised by the server about a device.
+
+    `device_hostname` is denormalised onto this so an alert list reads as
+    "sk-ThinkPad went quiet" rather than as a UUID an operator has to go and
+    look up. It is null when the device has since been deleted - the foreign
+    key is ON DELETE SET NULL, because removing a laptop must not erase the
+    record that something happened to it.
+    """
+
+    id: uuid.UUID
+    device_id: uuid.UUID | None
+    device_hostname: str | None = None
+    kind: IncidentKind
+    status: IncidentStatus
+    severity: str
+    summary: str
+    note: str | None
+    opened_at: dt.datetime
+    updated_at: dt.datetime
+    closed_at: dt.datetime | None
+    assigned_to: uuid.UUID | None
+
+
+class IncidentUpdateRequest(StrictModel):
+    """Triage an alert: change its status, add a note, or take ownership.
+
+    Every field optional, but a request that sets none of them is refused
+    rather than accepted as a no-op that bumped `updated_at` and told an
+    operator nothing changed.
+    """
+
+    status: IncidentStatus | None = None
+    note: Annotated[str, StringConstraints(min_length=1, max_length=2000)] | None = Field(
+        default=None,
+        description=(
+            "Appended to the existing note with a timestamp, never replacing it. "
+            "Whatever raised the alert is already recorded there."
+        ),
+    )
+    assign_to_me: bool = Field(default=False, description="Take ownership of this incident.")
+
+    @model_validator(mode="after")
+    def _must_change_something(self) -> IncidentUpdateRequest:
+        if self.status is None and self.note is None and not self.assign_to_me:
+            raise ValueError(
+                "give at least one of status, note or assign_to_me; an empty update "
+                "would only move the timestamp"
+            )
+        return self
+
+
+class IncidentCountsResponse(BaseModel):
+    """How many alerts need attention, for the navigation badge."""
+
+    open: int = Field(
+        description=(
+            "Incidents in open, acknowledged or investigating. Counted in the "
+            "database rather than from a fetched page."
+        )
+    )
+
+
+#: Computed once at import rather than passed as `default_factory`, which would
+#: leave `default: null` in the OpenAPI schema and stop telling a client what
+#: the default actually is. Still derived from `liveness`, so there is one
+#: source of truth; it depends on a constant rather than runtime state, so
+#: freezing it at import costs nothing.
+DEFAULT_OFFLINE_THRESHOLD_SECONDS = offline_threshold_seconds()
+
+
 class CheckOfflineDevicesRequest(StrictModel):
-    threshold_seconds: int = Field(default=900, ge=60, le=86400 * 30)
+    threshold_seconds: int = Field(
+        default=DEFAULT_OFFLINE_THRESHOLD_SECONDS,
+        ge=60,
+        le=86400 * 30,
+        description=(
+            "Silence tolerated before a device is flagged. Defaults to the same "
+            "threshold the device list uses to show a device as offline, so the list "
+            "and the alert agree. It used to default to 900s against a list that said "
+            "240s, which meant a laptop read as offline for eleven minutes before "
+            "anything was raised about it."
+        ),
+    )
 
 
 class CheckOfflineDevicesResponse(BaseModel):

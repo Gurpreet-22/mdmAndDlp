@@ -137,7 +137,17 @@ ACTIONS = frozenset(
         "policy_status_reported",
         "usb_exception_created",
         "usb_exception_revoked",
+        # An administrator moved an alert through triage - acknowledged it,
+        # resolved it, dismissed it as a false positive, or reopened it. The
+        # detail carries both the old and the new status, because "resolved"
+        # alone does not say whether anybody looked at it first.
         "incident_status_changed",
+        # A note or an assignee, with the status left alone. A separate action
+        # rather than reusing the one above, because writing "status changed"
+        # for an update that changed no status would be false in the one log
+        # that is supposed to be exact. It also answers a different question:
+        # who was working on this, as distinct from who closed it.
+        "incident_annotated",
         "audit_exported",
         "employee_created",
         "employee_updated",

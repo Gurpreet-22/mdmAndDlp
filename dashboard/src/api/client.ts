@@ -17,6 +17,11 @@ import type {
   DirectorySearchResponse,
   Employee,
   EnrollmentTokenResponse,
+  IncidentCountsResponse,
+  IncidentKind,
+  IncidentResponse,
+  IncidentStatus,
+  IncidentUpdateRequest,
   InstallerInfoResponse,
   MeResponse,
   OffboardingReviewResponse,
@@ -78,6 +83,11 @@ export type {
   Employee,
   EnrollmentTokenResponse,
   FieldError,
+  IncidentCountsResponse,
+  IncidentKind,
+  IncidentResponse,
+  IncidentStatus,
+  IncidentUpdateRequest,
   InstallerInfoResponse,
   MeResponse,
   OffboardingFlagResponse,
@@ -456,6 +466,40 @@ export const api = {
         // browser's own cache is not split in two by a redundant parameter.
         include_inactive: includeInactive ? true : undefined,
       },
+    }),
+
+  /**
+   * Alerts the server raised about devices, newest first.
+   *
+   * These were being written since the offline sweep was built and had no
+   * route to read them, so the dashboard could report "3 new alerts" and then
+   * show you nothing.
+   */
+  listIncidents: (params?: {
+    status?: IncidentStatus;
+    kind?: IncidentKind;
+    deviceId?: string;
+    openOnly?: boolean;
+    limit?: number;
+  }) =>
+    request<IncidentResponse[]>("/api/v1/incidents", {
+      query: {
+        status: params?.status || undefined,
+        kind: params?.kind || undefined,
+        device_id: params?.deviceId || undefined,
+        open_only: params?.openOnly ? true : undefined,
+        limit: params?.limit ?? 50,
+      },
+    }),
+
+  /** Just the open count, for the navigation badge. One COUNT(*), no rows. */
+  incidentCounts: () => request<IncidentCountsResponse>("/api/v1/incidents:counts"),
+
+  /** Acknowledge, investigate, resolve or dismiss an alert. Audited. */
+  updateIncident: (incidentId: string, body: IncidentUpdateRequest) =>
+    request<IncidentResponse>(`/api/v1/incidents/${encodeURIComponent(incidentId)}`, {
+      method: "PATCH",
+      body,
     }),
 
   /**

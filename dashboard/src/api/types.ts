@@ -279,6 +279,51 @@ export interface DirectorySearchResponse {
   truncated: boolean;
 }
 
+export type IncidentStatus =
+  | "open"
+  | "acknowledged"
+  | "investigating"
+  | "resolved"
+  | "false_positive";
+
+export type IncidentKind =
+  | "usb_blocked"
+  | "clone_suspected"
+  | "policy_rollback_failed"
+  | "enforcer_unavailable"
+  | "capability_lost"
+  | "audit_chain_broken"
+  | "device_offline";
+
+/** An alert the server raised about a device. */
+export interface IncidentResponse {
+  id: string;
+  device_id: string | null;
+  /** Null when the device has since been deleted; the alert outlives it. */
+  device_hostname: string | null;
+  kind: IncidentKind;
+  status: IncidentStatus;
+  severity: string;
+  summary: string;
+  note: string | null;
+  opened_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  assigned_to: string | null;
+}
+
+export interface IncidentUpdateRequest {
+  status?: IncidentStatus | null;
+  /** Appended to the existing note with a timestamp, never replacing it. */
+  note?: string | null;
+  assign_to_me?: boolean;
+}
+
+export interface IncidentCountsResponse {
+  /** Incidents in open, acknowledged or investigating. */
+  open: number;
+}
+
 /** A working device still assigned to somebody who appears to have left. */
 export interface OffboardingFlagResponse {
   device_id: string;

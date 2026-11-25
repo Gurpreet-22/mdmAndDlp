@@ -1,6 +1,8 @@
 import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { api } from "../api/client";
 import { useAuth } from "../auth";
 import Brand from "./Brand";
 import Icon, { type IconName } from "./Icon";
@@ -12,9 +14,51 @@ import Icon, { type IconName } from "./Icon";
  */
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
+  const [openAlerts, setOpenAlerts] = useState(0);
 
-  const links: { to: string; label: string; icon: IconName; visible: boolean }[] = [
+  /**
+   * Poll the open alert count.
+   *
+   * On the shell rather than the Alerts page, because the point of a badge is
+   * to be seen while you are somewhere else. One `COUNT(*)` a minute, and
+   * failures are swallowed: a missing badge is a small loss, whereas an error
+   * banner on every page because one count failed is a large one.
+   */
+  useEffect(() => {
+    if (!can("incident_read")) return;
+    let cancelled = false;
+    const poll = () =>
+      void api
+        .incidentCounts()
+        .then((counts) => {
+          if (!cancelled) setOpenAlerts(counts.open);
+        })
+        .catch(() => undefined);
+    poll();
+    const timer = window.setInterval(poll, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [can]);
+
+  const links: {
+    to: string;
+    label: string;
+    icon: IconName;
+    visible: boolean;
+    badge?: number;
+  }[] = [
     { to: "/devices", label: "Devices", icon: "devices", visible: can("device_read") },
+    {
+      to: "/alerts",
+      label: "Alerts",
+      icon: "alert",
+      visible: can("incident_read"),
+      // The count is why this link earns a badge: an alert nobody has looked
+      // at is the one thing on this bar that is actively waiting for someone.
+      badge: openAlerts || undefined,
+    },
     { to: "/employees", label: "Employees", icon: "employees", visible: can("device_read") },
     {
       to: "/enrollment",
@@ -42,6 +86,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               >
                 <Icon name={link.icon} size={17} />
                 {link.label}
+                {link.badge ? <span className="nav-badge">{link.badge}</span> : null}
               </NavLink>
             ))}
         </nav>

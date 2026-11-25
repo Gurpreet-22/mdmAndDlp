@@ -31,6 +31,7 @@ from ubuntuguard.constants import (
     ACCESS_TOKEN_TTL_SECONDS,
     REFRESH_TOKEN_TTL_SECONDS,
 )
+from ubuntuguard.liveness import offline_threshold_seconds
 from ubuntuguard.models import (
     POLICY_TYPES,
     AuthToken,
@@ -1083,6 +1084,14 @@ def list_assigned_devices(session: Session) -> Sequence[Device]:
     )
 
 
+def find_devices_by_ids(session: Session, ids: Sequence[uuid.UUID]) -> Sequence[Device]:
+    """Every device in `ids`. One statement, for labelling a page of rows."""
+    wanted = set(ids)
+    if not wanted:
+        return []
+    return list(session.scalars(select(Device).where(Device.id.in_(wanted))).all())
+
+
 def find_employees_by_ids(session: Session, ids: Sequence[uuid.UUID]) -> Sequence[Employee]:
     """Every employee in `ids`. One statement, for annotating a page of rows."""
     wanted = set(ids)
@@ -1262,9 +1271,18 @@ def list_device_assignments(
 def check_offline_devices(
     session: Session,
     *,
-    threshold_seconds: int = 900,
+    threshold_seconds: int | None = None,
 ) -> tuple[int, int, int, list[uuid.UUID]]:
-    """Scan active enrolled devices and raise incidents for ones missing heartbeats."""
+    """Scan active enrolled devices and raise incidents for ones missing heartbeats.
+
+    `threshold_seconds` defaults to the same value `liveness.is_online` uses, so
+    the fleet list and the alerting agree about how long is too long. They were
+    independent constants - 240 seconds on the list, 900 here - which meant a
+    device displayed as offline for eleven minutes before anything was raised.
+    Deriving one from the other is what stops them drifting apart again.
+    """
+    if threshold_seconds is None:
+        threshold_seconds = offline_threshold_seconds()
     now = dt.datetime.now(dt.UTC)
     cutoff = now - dt.timedelta(seconds=threshold_seconds)
 
@@ -1295,7 +1313,7 @@ def check_offline_devices(
                     select(Incident).where(
                         Incident.device_id == dev.id,
                         Incident.kind == "device_offline",
-                        Incident.status.in_(["open", "acknowledged", "investigating"]),
+                        Incident.status.in_(OPEN_INCIDENT_STATUSES),
                     )
                 )
                 if not existing:
@@ -1314,6 +1332,96 @@ def check_offline_devices(
     return checked, len(flagged), new_incidents, flagged
 
 
+#: Statuses that mean somebody still has to look at this. Shared by the
+#: offline sweep's duplicate check, the auto-resolve on reconnect and the
+#: dashboard's open count, so "still needs attention" means one thing.
+OPEN_INCIDENT_STATUSES: Sequence[str] = ("open", "acknowledged", "investigating")
+
+
+def list_incidents(
+    session: Session,
+    *,
+    status: str | None = None,
+    kind: str | None = None,
+    device_id: uuid.UUID | None = None,
+    open_only: bool = False,
+    limit: int = 100,
+) -> Sequence[Incident]:
+    """Incidents, newest first.
+
+    Newest first because an operator opening an alert list wants what just
+    happened, not what happened when the fleet was first enrolled. The audit
+    log is the opposite by design - it is a chain and reads forwards.
+    """
+    stmt = select(Incident).order_by(Incident.opened_at.desc())
+    if open_only:
+        stmt = stmt.where(Incident.status.in_(OPEN_INCIDENT_STATUSES))
+    if status:
+        stmt = stmt.where(Incident.status == status)
+    if kind:
+        stmt = stmt.where(Incident.kind == kind)
+    if device_id is not None:
+        stmt = stmt.where(Incident.device_id == device_id)
+    return list(session.scalars(stmt.limit(limit)).all())
+
+
+def get_incident(session: Session, incident_id: uuid.UUID) -> Incident | None:
+    return session.get(Incident, incident_id)
+
+
+def count_open_incidents(session: Session) -> int:
+    """How many incidents still need a human. Counted in the database.
+
+    Same reasoning as the fleet counts: deriving this from a fetched page goes
+    quietly wrong the moment there are more incidents than the page holds.
+    """
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(Incident)
+            .where(Incident.status.in_(OPEN_INCIDENT_STATUSES))
+        )
+        or 0
+    )
+
+
+def update_incident(
+    session: Session,
+    *,
+    incident: Incident,
+    status: str | None = None,
+    note: str | None = None,
+    assigned_to: uuid.UUID | None = None,
+) -> Incident:
+    """Change an incident's status, appending rather than replacing its note.
+
+    Appending matters. The note already carries whatever raised the alert - how
+    long a device had been silent, or the automatic resolution when it came
+    back - and overwriting it would destroy the history of the thing being
+    triaged in the act of triaging it.
+
+    `closed_at` is set when the status becomes terminal and cleared if an
+    incident is reopened, so "closed" and "has a closing time" cannot disagree.
+    """
+    now = dt.datetime.now(dt.UTC)
+    if status is not None:
+        incident.status = status
+        if status in ("resolved", "false_positive"):
+            incident.closed_at = now
+        else:
+            # Reopened. Leaving a stale closed_at behind would make a live
+            # incident look finished to anything reading that column.
+            incident.closed_at = None
+    if note:
+        stamp = f"[{now.isoformat(timespec='seconds')}] {note}"
+        incident.note = f"{incident.note}\n{stamp}" if incident.note else stamp
+    if assigned_to is not None:
+        incident.assigned_to = assigned_to
+    incident.updated_at = now
+    session.flush()
+    return incident
+
+
 def resolve_offline_incidents_for_device(
     session: Session,
     device_id: uuid.UUID,
@@ -1323,7 +1431,7 @@ def resolve_offline_incidents_for_device(
         select(Incident).where(
             Incident.device_id == device_id,
             Incident.kind == "device_offline",
-            Incident.status.in_(["open", "acknowledged", "investigating"]),
+            Incident.status.in_(OPEN_INCIDENT_STATUSES),
         )
     ).all()
     for inc in open_incidents:

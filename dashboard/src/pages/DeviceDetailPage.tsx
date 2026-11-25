@@ -9,6 +9,7 @@ import type {
   DeviceAssignment,
   DeviceDetail,
   Employee,
+  IncidentResponse,
 } from "../api/client";
 import { useAuth } from "../auth";
 
@@ -55,6 +56,8 @@ export default function DeviceDetailPage() {
   const { can } = useAuth();
   const [device, setDevice] = useState<DeviceDetail | null>(null);
   const [assignments, setAssignments] = useState<DeviceAssignment[]>([]);
+  /** Alerts the server raised about this laptop specifically. */
+  const [incidents, setIncidents] = useState<IncidentResponse[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [reason, setReason] = useState("");
@@ -73,14 +76,19 @@ export default function DeviceDetailPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [dev, hist, emps] = await Promise.all([
+      const [dev, hist, emps, alerts] = await Promise.all([
         api.getDevice(deviceId),
         api.getDeviceAssignments(deviceId),
         api.listEmployees(),
+        // This device's own alerts. Caught rather than allowed to fail the
+        // page: a role that can read a device but not incidents should still
+        // see the device.
+        api.listIncidents({ deviceId, limit: 20 }).catch(() => []),
       ]);
       setDevice(dev);
       setAssignments(hist);
       setEmployees(emps);
+      setIncidents(alerts);
     } catch (caught) {
       setError(caught);
     }
@@ -360,6 +368,44 @@ export default function DeviceDetailPage() {
 
       {/* Assignment History */}
       <div className="card" style={{ marginTop: "1rem" }}>
+        <h2>Alerts</h2>
+        {incidents.length === 0 ? (
+          <p className="muted small">
+            Nothing has been raised about this device.
+          </p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>What happened</th>
+                <th>Status</th>
+                <th>Opened</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {incidents.map((incident) => (
+                <tr key={incident.id}>
+                  <td>
+                    <div>{incident.kind.replace(/_/g, " ")}</div>
+                    <div className="muted small">{incident.summary}</div>
+                  </td>
+                  <td>
+                    <span className="pill neutral">{incident.status.replace(/_/g, " ")}</span>
+                  </td>
+                  <td className="muted small">{incident.opened_at}</td>
+                  <td className="muted small">{incident.closed_at ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted small">
+          Triage them on the <Link to="/alerts">Alerts</Link> page.
+        </p>
+      </div>
+
+      <div className="card table-card">
         <h2>Ownership & Assignment History</h2>
         {assignments.length === 0 ? (
           <p className="muted small">No assignment history recorded yet for this device.</p>

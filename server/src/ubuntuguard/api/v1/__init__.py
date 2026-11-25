@@ -16,6 +16,7 @@ from ubuntuguard.api.v1 import (
     devices,
     employees,
     enrollment,
+    incidents,
     installer,
     policies,
     users,
@@ -42,6 +43,9 @@ def build_router() -> APIRouter:
     router.include_router(enrollment.admin_router)
     router.include_router(devices.admin_router)
     router.include_router(policies.admin_router)
+    # The alerts the server raises about devices. Read and update only; see the
+    # module docstring for why there is no POST.
+    router.include_router(incidents.router)
     router.include_router(audit_log.router)
 
     # --- Device plane --------------------------------------------------- #

@@ -1212,3 +1212,67 @@ td .pill + .pill {
     flex: 1 1 100%;
   }
 }
+
+/* ------------------------------------------------------------- alerts --- */
+
+/* A count on a navigation link. Only ever rendered when it is non-zero, so
+   "no badge" and "a badge reading 0" cannot be confused. */
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--bad);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The expanded row under an alert: its history on the left, the triage
+   controls on the right, stacking on a narrow window. */
+.alert-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  padding: 0.5rem 0 0.75rem;
+}
+
+.alert-detail > div {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+/* The note is an append-only log, so its newlines carry meaning and must not
+   be collapsed. Wrapped rather than scrolled sideways, because the lines are
+   sentences and a horizontal scrollbar would hide the newest ones. */
+.note-log {
+  margin: 0.2rem 0 0;
+  padding: 0.5rem 0.6rem;
+  max-height: 11rem;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.83rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.alert-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.alert-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}

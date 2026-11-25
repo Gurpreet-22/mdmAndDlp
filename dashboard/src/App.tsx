@@ -5,6 +5,7 @@ import { useAuth } from "./auth";
 import AuditLogPage from "./pages/AuditLogPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import DeviceDetailPage from "./pages/DeviceDetailPage";
+import AlertsPage from "./pages/AlertsPage";
 import DevicesPage from "./pages/DevicesPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import EnrollPage from "./pages/EnrollPage";
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/devices" replace />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/devices/:deviceId" element={<DeviceDetailPage />} />
+        <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/enrollment" element={<EnrollmentTokensPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
