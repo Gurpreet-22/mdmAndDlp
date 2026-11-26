@@ -100,6 +100,15 @@ ACTIONS = frozenset(
         # Rate-limited to one row per device+reason per hour, see api/deps.py.
         "unauthorized_device_communication",
         "clone_suspected",
+        # The agent told us it was being uninstalled. Written against the
+        # device rather than a user, because nobody logged in to cause it.
+        #
+        # Not `device_revoked`: the identity is untouched and the laptop is
+        # still an asset. This says enforcement stopped, which is a coverage
+        # fact, not a trust decision. An operator reading the log needs to tell
+        # "somebody removed the agent" from "we withdrew this device's
+        # identity", and one action for both would hide the difference.
+        "device_agent_removed",
         "certificate_issued",
         # --- certificate rotation ------------------------------------------ #
         # Three actions rather than one, because an auditor reading this log

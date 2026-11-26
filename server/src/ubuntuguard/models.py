@@ -329,6 +329,22 @@ class Device(Base):
     reported_manufacturer: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reported_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
+    #: When the agent told us it was being uninstalled, and why.
+    #:
+    #: This is what separates "the laptop is off" from "the agent is gone".
+    #: Both stop heartbeating, and before this field they were the same row.
+    #:
+    #: Cleared by the next heartbeat: a reinstall should not need an
+    #: administrator to tidy up after it.
+    #:
+    #: A courtesy message, not evidence. The package sends it from `prerm`
+    #: before stopping the services, so an ordinary `apt remove` reports
+    #: itself; somebody who stops the service first or pulls the network sends
+    #: nothing. Absence of heartbeats remains the signal that cannot be
+    #: suppressed, which is why the offline sweep is not replaced by this.
+    agent_removed_at: Mapped[dt.datetime | None] = timestamp(nullable=True)
+    agent_removed_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     # A fingerprint collision does not block enrollment. The new device is
     # created as distinct and flagged, because a reimaged laptop and a cloned
     # VM look identical here and only a human can tell them apart.

@@ -52,6 +52,7 @@ from ubuntuguard_agent.enrollment import (
     read_token_from_stdin,
 )
 from ubuntuguard_agent.errors import AgentError, ConfigError, InsecureFileError
+from ubuntuguard_agent.heartbeat import build_device_client
 from ubuntuguard_agent.identity import (
     PRIVATE_FILE_MODE,
     assert_private_file,
@@ -152,8 +153,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common(selftest_parser)
 
+    deregister_parser = subparsers.add_parser(
+        "deregister",
+        help="Tell the server this agent is being uninstalled",
+    )
+    deregister_parser.add_argument(
+        "--reason",
+        default="agent deregistered",
+        help="Free text recorded against the device, e.g. 'package removed'.",
+    )
+
     subparsers.add_parser("version", help="Print the agent version")
     return parser
+
+
+# --------------------------------------------------------------------------- #
+# deregister
+# --------------------------------------------------------------------------- #
+
+
+def command_deregister(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    return _cmd_deregister(config, args.reason)
+
+
+def _cmd_deregister(config: AgentConfig, reason: str) -> int:
+    """Report that this agent is going away, then exit zero regardless.
+
+    Called from the package's `prerm`, which means the exit code is attached to
+    an uninstall in progress. A package that refuses to come off because a
+    server is unreachable would be a worse problem than a stale fleet record,
+    so every failure here is reported on stdout and swallowed.
+
+    Not enrolled is success, not an error: there is nothing to tell the server
+    about a laptop that never had an identity.
+    """
+    if not is_enrolled(config.paths):
+        print("not enrolled; nothing to report")
+        return 0
+    if not config.is_configured:
+        print("no server configured; nothing to report")
+        return 0
+
+    try:
+        client = build_device_client(config)
+        response = client.post_json(
+            "api/v1/devices/me:deregister", {"reason": reason[:200]}
+        )
+    except Exception as exc:  # noqa: BLE001 - must never fail an uninstall
+        print(f"could not reach the server: {exc}")
+        print("the fleet record will show this device as offline instead")
+        return 0
+
+    if 200 <= response.status < 300:
+        print("server notified that this agent is being removed")
+    else:
+        # A 401 is the expected answer on an already-revoked device, and is not
+        # worth alarming an uninstall about.
+        print(f"server returned {response.status}; continuing with removal")
+    return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -553,6 +611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "enroll": command_enroll,
         "status": command_status,
         "selftest": command_selftest,
+        "deregister": command_deregister,
     }
     handler = handlers.get(args.command)
     if handler is None:  # pragma: no cover - argparse enforces the choices

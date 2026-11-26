@@ -218,6 +218,13 @@ export interface DeviceDetail extends DeviceSummary {
    */
   reported_manufacturer: string | null;
   reported_model: string | null;
+  /**
+   * When the agent reported it was being uninstalled. Null is NOT proof the
+   * agent is present - somebody who stops the service first sends nothing.
+   * Cleared by the next heartbeat.
+   */
+  agent_removed_at: string | null;
+  agent_removed_reason: string | null;
 }
 
 /**

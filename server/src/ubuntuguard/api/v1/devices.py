@@ -32,10 +32,12 @@ from ubuntuguard.schemas import (
     CertificateRenewResponse,
     CheckOfflineDevicesRequest,
     CheckOfflineDevicesResponse,
+    DeregisterRequest,
     DeviceAssignmentResponse,
     DeviceCounts,
     DeviceDetail,
     DeviceSummary,
+    FleetCoverageResponse,
     HeartbeatRequest,
     HeartbeatResponse,
     RegisterDeviceRequest,
@@ -100,6 +102,8 @@ def _detail(device: Device, now: dt.datetime) -> DeviceDetail:
         disk_free_bytes=device.disk_free_bytes,
         reported_manufacturer=device.reported_manufacturer,
         reported_model=device.reported_model,
+        agent_removed_at=device.agent_removed_at,
+        agent_removed_reason=device.agent_removed_reason,
     )
 
 
@@ -297,6 +301,25 @@ def revoke_device(
         detail={"hostname": device.hostname, "reason": body.reason},
     )
     session.commit()
+
+
+@admin_router.get(":coverage", response_model=FleetCoverageResponse)
+def fleet_coverage(
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_capability(Capability.DEVICE_READ)),
+) -> FleetCoverageResponse:
+    """How much of the estate is actually being enforced on.
+
+    Separate from `:counts`, which answers "how many devices are there and
+    what state are they in". This answers the narrower and more awkward
+    question: how many company laptops is this product actually protecting.
+
+    The two differ in one way that matters. `:counts` reports `enrolled`, which
+    includes a laptop whose agent was uninstalled an hour ago - it did enrol,
+    after all. Coverage does not count that as protected, because nothing is
+    enforcing on it.
+    """
+    return FleetCoverageResponse(**repositories.count_fleet_coverage(session))
 
 
 @admin_router.post(":check-offline", response_model=CheckOfflineDevicesResponse)
@@ -502,6 +525,55 @@ def renew_certificate(
         request=body,
         request_id=getattr(request.state, "request_id", None),
     )
+
+
+@device_router.post(":deregister", status_code=204)
+def deregister(
+    body: DeregisterRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    device: DevicePrincipal = Depends(get_device_principal),
+) -> None:
+    """The agent reporting that it is being uninstalled.
+
+    Sent by the package's `prerm` before it stops the services, so an ordinary
+    `apt remove` is recorded as what it is. Without this a laptop whose agent
+    was removed looked identical to one that was switched off: both simply stop
+    heartbeating.
+
+    Deliberately does NOT revoke the device. The laptop is still a company
+    asset and the certificate is still one this CA issued; what changed is that
+    nothing is enforcing on it. Treating an uninstall as a revocation would
+    mean a reinstall needed a fresh token, and would overstate what happened -
+    nobody decided this device was untrusted.
+
+    A courtesy, not evidence. Anyone who stops the service first or pulls the
+    network sends nothing, and section 4 of the feature list says plainly that
+    a local root user can do that. The signal that cannot be suppressed is the
+    absence of heartbeats, which is why the offline sweep still runs.
+    """
+    row = repositories.get_device(session, uuid.UUID(device.device_id))
+    if row is None:
+        raise problems.device_not_authenticated("device_not_active")
+
+    repositories.mark_agent_removed(session, device=row, reason=body.reason)
+    audit.append(
+        session,
+        action="device_agent_removed",
+        # Written against the device, not a user. Nobody logged in to cause
+        # this, and attributing it to an administrator would be false.
+        target_type="device",
+        target_id=str(row.id),
+        request_id=getattr(request.state, "request_id", None),
+        detail={
+            "hostname": row.hostname,
+            "reason": body.reason,
+            # Recorded because it is the question an operator asks next: was
+            # this laptop still assigned to somebody when its agent went away?
+            "assigned_to_email": row.assigned_to_email,
+        },
+    )
+    session.commit()
 
 
 @device_router.post("/heartbeat", response_model=HeartbeatResponse)

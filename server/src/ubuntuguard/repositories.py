@@ -23,7 +23,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, cast
 
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
@@ -945,6 +945,14 @@ def touch_heartbeat(
     # "when inventory last actually arrived" rather than "when this device last
     # said hello", which are different questions and the dashboard asks the
     # first one.
+    # A heartbeat means the agent is running, so any record of its removal is
+    # stale. Cleared here rather than needing an administrator to tidy up after
+    # a reinstall, and cleared on the FIRST beat so coverage is right
+    # immediately rather than after the next sweep.
+    if device.agent_removed_at is not None:
+        device.agent_removed_at = None
+        device.agent_removed_reason = None
+
     reported_inventory = False
     if cpu_model is not None:
         device.cpu_model = cpu_model[:128]
@@ -1082,6 +1090,78 @@ def list_assigned_devices(session: Session) -> Sequence[Device]:
             .order_by(Device.assigned_to_email, Device.hostname)
         ).all()
     )
+
+
+def mark_agent_removed(session: Session, *, device: Device, reason: str | None) -> Device:
+    """Record that this device's agent was uninstalled.
+
+    The device's identity is deliberately left alone. It is not revoked, and
+    `status` stays `active`: the laptop is still a company asset and the
+    certificate is still one we issued. What changed is that nothing is
+    enforcing on it, which is a coverage fact rather than a trust decision.
+    Conflating the two would mean an uninstall quietly became a revocation,
+    and a reinstall would then need a new token.
+    """
+    device.agent_removed_at = dt.datetime.now(dt.UTC)
+    device.agent_removed_reason = reason[:200] if reason else None
+    session.flush()
+    return device
+
+
+def count_fleet_coverage(session: Session) -> dict[str, int]:
+    """How much of the estate is actually protected.
+
+    Four mutually exclusive buckets, counted in the database so the answer does
+    not depend on how many rows the dashboard happened to fetch:
+
+    - `protected`    enrolled, not revoked, agent still present
+    - `agent_removed` enrolled, but the agent was uninstalled
+    - `never_enrolled` a company laptop that has never run the agent
+    - `revoked`      identity withdrawn
+
+    `protected` is the only one of the four that means a laptop is being
+    enforced on, and it is deliberately the narrowest: a device counts as
+    protected only if nothing has told us otherwise.
+    """
+    row = session.execute(
+        select(
+            func.count().label("total"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            Device.enrolled_at.is_not(None),
+                            Device.status != "revoked",
+                            Device.agent_removed_at.is_(None),
+                        ),
+                        1,
+                    )
+                )
+            ).label("protected"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            Device.agent_removed_at.is_not(None),
+                            Device.status != "revoked",
+                        ),
+                        1,
+                    )
+                )
+            ).label("agent_removed"),
+            func.count(
+                case((and_(Device.enrolled_at.is_(None), Device.status != "revoked"), 1))
+            ).label("never_enrolled"),
+            func.count(case((Device.status == "revoked", 1))).label("revoked"),
+        ).select_from(Device)
+    ).one()
+    return {
+        "total": row.total,
+        "protected": row.protected,
+        "agent_removed": row.agent_removed,
+        "never_enrolled": row.never_enrolled,
+        "revoked": row.revoked,
+    }
 
 
 def devices_assigned_to_employee(session: Session, employee_id: uuid.UUID) -> Sequence[Device]:

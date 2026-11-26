@@ -65,6 +65,13 @@ CAPABILITY_EXEMPT: dict[str, str] = {
         "authenticated by the mTLS client certificate; a device may report "
         "only on the policy it is actually under, checked in the handler"
     ),
+    "POST /api/v1/devices/me:deregister": (
+        "authenticated by the mTLS client certificate, and a device may only "
+        "deregister itself - the subject comes from the presented certificate, "
+        "never from the body. Carries no capability because no administrator is "
+        "involved: the caller is a laptop reporting that its own agent is being "
+        "uninstalled, sent by the package's prerm before the services stop"
+    ),
     # --- Public: an enrolling employee has no account ---------------------- #
     "GET /api/v1/installer": "public installer metadata; carries no secret",
     "GET /api/v1/installer/download": "public installer download; carries no secret",

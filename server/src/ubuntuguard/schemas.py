@@ -602,6 +602,17 @@ class DeviceDetail(DeviceSummary):
     reported_model: str | None = Field(
         default=None, description="Model as the firmware reports it."
     )
+    agent_removed_at: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "When the agent reported that it was being uninstalled. Null means no "
+            "such report, which is NOT proof the agent is present - somebody who "
+            "stops the service first sends nothing. Cleared by the next heartbeat."
+        ),
+    )
+    agent_removed_reason: str | None = Field(
+        default=None, description="Free text from the uninstalling package."
+    )
 
 
 class RegisterDeviceRequest(StrictModel):
@@ -1022,6 +1033,32 @@ class IncidentCountsResponse(BaseModel):
 #: source of truth; it depends on a constant rather than runtime state, so
 #: freezing it at import costs nothing.
 DEFAULT_OFFLINE_THRESHOLD_SECONDS = offline_threshold_seconds()
+
+
+class DeregisterRequest(StrictModel):
+    """Body of `POST /devices/me:deregister`, sent by the package on removal."""
+
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = Field(
+        default=None,
+        description="Free text from the uninstalling package, e.g. 'package removed'.",
+    )
+
+
+class FleetCoverageResponse(BaseModel):
+    """How much of the estate is actually being enforced on.
+
+    Four mutually exclusive buckets. `protected` is the narrowest on purpose:
+    a laptop counts only when it enrolled, was not revoked, and has not told us
+    its agent was removed. Everything else is a gap of some kind, and naming
+    the kinds separately is the point - "we have 40 laptops and 31 are
+    protected" is a different conversation from "9 are missing the agent".
+    """
+
+    total: int
+    protected: int = Field(description="Enrolled, not revoked, agent still present.")
+    agent_removed: int = Field(description="Enrolled, but the agent reported itself uninstalled.")
+    never_enrolled: int = Field(description="A company laptop that has never run the agent.")
+    revoked: int
 
 
 class CheckOfflineDevicesRequest(StrictModel):
